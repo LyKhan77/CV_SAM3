@@ -1,0 +1,16 @@
+# PyTorch custom index for CUDA
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# Web Server
+fastapi==0.122.0
+uvicorn==0.38.0
+websockets==15.0.1
+
+# CV & AI
+opencv-python==4.12.0.88
+torch
+torchvision
+Pillow==12.0.0
+
+# SAM 3 Model from main branch
+transformers @ git+https://github.com/huggingface/transformers

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI CV Dashboard | GSPE</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#003473',
+                        secondary: '#F3F4F6',
+                        success: '#86EFAC', // Light green for Approved
+                        danger: '#FECACA', // Light red for Alert
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #F8F9FA; }
+        
+        /* Custom Toggle Switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #003473;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #003473;
+        }
+        
+        /* Custom Scrollbar for description */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+        /* Loader Animation */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #003473;
+            width: 24px;
+            height: 24px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-gray-700 h-screen flex flex-col overflow-hidden">
+
+    <!-- ================= HEADER ================= -->
+    <header class="bg-white border-b border-gray-200 shadow-sm z-10 shrink-0">
+        <div class="max-w-[1920px] mx-auto px-6 h-16 flex items-center justify-between">
+            <!-- Left: Logo -->
+            <div class="flex items-center gap-3">
+                <img src="/static/logo.png" alt="GSPE Logo" class="h-20 w-auto">
+                <div class="flex flex-col">
+                    <span class="font-bold text-gray-800 text-sm">GRAHASUMBER PRIMA ELEKTRONIK</span>
+                    <span class="text-[10px] text-gray-500 tracking-widest">POWER IT</span>
+                </div>
+            </div>
+
+            <!-- Center: Title -->
+            <div class="flex items-center gap-2">
+                <h1 class="text-2xl font-bold text-primary">Dashboard</h1>
+                <span class="text-2xl font-medium text-gray-400">|</span>
+                <h2 class="text-2xl font-semibold text-gray-600">Prototype CV</h2>
+            </div>
+
+            <!-- Right: Date/Time -->
+            <div class="text-right">
+                <div id="clock-time" class="text-lg font-bold text-gray-700 leading-tight">12:00 PM</div>
+                <div id="clock-date" class="text-xs text-gray-400">Monday, 25 Nov 2024</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ================= MAIN CONTENT ================= -->
+    <main class="flex-1 overflow-y-auto p-4 lg:p-6">
+        <div class="max-w-[1920px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
+            
+            <!-- LEFT COLUMN (Stream & Prompt) -->
+            <div class="lg:col-span-8 flex flex-col gap-6">
+                
+                <!-- Streaming Panel -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col gap-4 flex-1">
+                    <h3 class="text-xl font-bold text-primary">Streaming Panel</h3>
+                    
+                    <!-- Video Container -->
+                    <div class="relative bg-gray-100 rounded-lg border border-gray-200 flex-1 min-h-[400px] flex items-center justify-center overflow-hidden group">
+                        <div id="stream-placeholder" class="text-center">
+                            <i class="fa-regular fa-circle-play text-gray-400 text-6xl mb-4 group-hover:text-primary transition-colors"></i>
+                            <p class="text-gray-400 font-medium">&lt;Camera RTSP Live Stream&gt;</p>
+                        </div>
+                        <!-- Simulated Live Overlay (Hidden by default) -->
+                        <div id="live-indicator" class="hidden absolute top-4 left-4 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse">
+                            LIVE
+                        </div>
+                        <img id="mock-video-feed" src="" alt="Stream" class="hidden w-full h-full object-cover">
+                    </div>
+
+                    <!-- Input RTSP -->
+                    <div class="mt-auto">
+                        <label class="block text-sm font-medium text-gray-600 mb-2">Input RTSP URL</label>
+                        <div class="flex gap-3">
+                            <input type="text" id="rtsp-input" placeholder="rtsp://192.168.1.1:554/stream" 
+                                class="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm">
+                            <button onclick="activateStream()" class="bg-primary hover:bg-blue-800 text-white font-bold px-8 py-2 rounded-lg text-sm transition-colors shadow-md">
+                                ENTER
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Prompt Panel -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                    <h3 class="text-xl font-bold text-primary mb-3">Prompt</h3>
+                    <div class="flex gap-3">
+                        <input type="text" id="prompt-input" placeholder="{Object Name}" 
+                            class="flex-1 h-14 border border-gray-300 rounded-lg px-4 focus:outline-none focus:ring-2 focus:ring-primary/50 text-lg text-gray-700">
+                        <button onclick="processPrompt()" class="bg-primary hover:bg-blue-800 text-white font-bold px-8 rounded-lg text-sm transition-colors shadow-md h-14">
+                            ENTER
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- RIGHT COLUMN (Description & Summary) -->
+            <div class="lg:col-span-4 flex flex-col gap-6">
+                
+                <!-- Description Panel -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col h-auto min-h-[200px]">
+                    <h3 class="text-xl font-bold text-primary mb-4">Description</h3>
+                    <div class="bg-gray-50 border border-gray-100 rounded-xl flex-1 p-6 flex items-center justify-center text-center overflow-hidden">
+                        <p id="object-description" class="text-2xl font-bold text-gray-400 transition-all duration-300">
+                            {Object Description}
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Summary Panel -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex-1 flex flex-col gap-5">
+                    <h3 class="text-xl font-bold text-primary">Summary</h3>
+
+                    <!-- Activate Sound -->
+                    <div class="border border-gray-200 rounded-lg p-4 flex items-center justify-between bg-gray-50/50">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-volume-high text-gray-500"></i>
+                            <span class="font-medium text-gray-700">Activate Notification Sound</span>
+                        </div>
+                        <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggle" id="sound-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-gray-300 checked:border-primary transition-all duration-300 left-0 checked:left-5"/>
+                            <label for="sound-toggle" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer"></label>
+                        </div>
+                    </div>
+
+                    <!-- Max Limit -->
+                    <div class="border border-gray-200 rounded-lg p-4 flex items-center justify-between bg-gray-50/50">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-gauge-high text-gray-500"></i>
+                            <span class="font-medium text-gray-700">Maximum limit :</span>
+                        </div>
+                        <input type="number" id="max-limit" value="100"
+                            class="w-20 border border-gray-300 rounded px-2 py-1 text-right focus:outline-none focus:border-primary font-bold text-gray-700">
+                    </div>
+
+                    <!-- Status -->
+                    <div class="border border-gray-200 rounded-lg p-4 flex items-center justify-between bg-gray-50/50">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-wave-square text-gray-500"></i>
+                            <span class="font-medium text-gray-700">Status :</span>
+                        </div>
+                        <span id="status-badge" class="px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-green-200 text-green-800 transition-colors duration-300">
+                            Approved
+                        </span>
+                    </div>
+
+                    <!-- Total Detected Card -->
+                    <div class="bg-gray-50 rounded-xl border border-gray-200 p-6 flex flex-col items-center justify-center mt-auto shadow-inner relative overflow-hidden">
+                        <h4 class="text-lg font-medium text-gray-600 mb-2">Total Detected</h4>
+                        <div class="relative">
+                            <span id="detected-count" class="text-6xl font-black text-primary tracking-tight transition-all duration-300">0</span>
+                        </div>
+                        
+                        <!-- Progress Bar Container -->
+                        <div class="w-full mt-6 mb-1">
+                            <div class="w-full bg-gray-300 rounded-full h-3">
+                                <div id="progress-bar" class="bg-primary h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Mini Legend -->
+                        <div class="w-full flex justify-end">
+                            <span id="progress-legend" class="text-[10px] text-gray-400 font-mono">{count}/{Max_Limit}</span>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- Sound Effect (Hidden) -->
+    <audio id="notification-sound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"></audio>
+
+    <!-- ================= BACKEND LOGIC MOCKUP ================= -->
+    <script src="/static/app.js" defer></script>
+</body>
+</html>
