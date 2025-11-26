@@ -1,11 +1,13 @@
 import asyncio
 import uvicorn
+import os
+import shutil
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from typing import List, Dict
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any
 
 # Import logic from model.py
 from model import load_model, video_processing_loop
@@ -15,15 +17,24 @@ class StreamRequest(BaseModel): url: str
 class PromptRequest(BaseModel): object_name: str
 class LimitRequest(BaseModel): value: int
 class SoundRequest(BaseModel): enabled: bool
+class ModelConfigRequest(BaseModel):
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    display_mode: str
 
 # --- 2. Application State & WebSocket Manager ---
-app_state: Dict = {
+app_state: Dict[str, Any] = {
     "rtsp_url": None,
+    "uploaded_image_path": None,  # NEW field for local image support
     "prompt": None,
+    "point_prompt": None,
     "max_limit": 100,
     "sound_enabled": False,
     "model": None,
     "processor": None,
+    # New state for model configuration
+    "confidence_threshold": 0.5,
+    "display_mode": "segmentation", # "segmentation" or "bounding_box"
+    "select_object_mode": False,
 }
 
 class ConnectionManager:
@@ -40,9 +51,7 @@ manager = ConnectionManager()
 # --- 3. Application Lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Handles application startup and shutdown events."""
     print("--- Application Startup ---")
-    # Load the model and processor and store them in the app_state
     model, processor = load_model()
     app_state["model"] = model
     app_state["processor"] = processor
@@ -74,6 +83,7 @@ async def set_stream_url(request: StreamRequest):
 @app.post("/api/config/prompt")
 async def set_prompt(request: PromptRequest):
     app_state["prompt"] = request.object_name
+    app_state["point_prompt"] = None # Clear point prompt when text prompt is used
     return {"status": "success", "message": f"Prompt set to '{request.object_name}'"}
 
 @app.post("/api/config/limit")
@@ -86,11 +96,72 @@ async def set_sound_toggle(request: SoundRequest):
     app_state["sound_enabled"] = request.enabled
     return {"status": "success", "message": f"Sound notification set to {request.enabled}"}
 
+# New endpoint for model configuration
+@app.post("/api/config/model")
+async def set_model_config(request: ModelConfigRequest):
+    app_state["confidence_threshold"] = request.confidence
+    app_state["display_mode"] = request.display_mode
+    print(f"Model config updated: Confidence={request.confidence}, Display={request.display_mode}")
+    return {"status": "success", "message": "Model config updated"}
+
+@app.post("/api/upload/image")
+async def upload_image(file: UploadFile = File(...)):
+    """
+    Upload an image file for local processing.
+    Disables RTSP streaming when an image is uploaded.
+    """
+    # Validate file type
+    if not file.content_type.startswith('image/'):
+        return {"status": "error", "message": "File must be an image"}
+
+    # Create uploads directory if not exists
+    os.makedirs("uploads", exist_ok=True)
+
+    # Save file
+    file_path = f"uploads/{file.filename}"
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Update app state
+        app_state["uploaded_image_path"] = file_path
+        app_state["rtsp_url"] = None  # Disable RTSP when using local image
+        app_state["prompt"] = None  # Clear existing prompts
+        app_state["point_prompt"] = None
+
+        print(f"Image uploaded successfully: {file.filename}")
+        return {"status": "success", "message": f"Image uploaded: {file.filename}"}
+
+    except Exception as e:
+        print(f"Error uploading image: {e}")
+        return {"status": "error", "message": f"Upload failed: {str(e)}"}
+
+@app.post("/api/config/clear-image")
+async def clear_uploaded_image():
+    """
+    Clear the uploaded image and restore RTSP capability.
+    """
+    app_state["uploaded_image_path"] = None
+    app_state["prompt"] = None
+    app_state["point_prompt"] = None
+
+    # Optionally delete the uploaded file
+    # (Implement file cleanup if needed)
+
+    print("Uploaded image cleared")
+    return {"status": "success", "message": "Local image cleared"}
+
 @app.websocket("/ws/monitor")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        while True: await websocket.receive_text()
+        while True: 
+            # Handle incoming messages for point prompts
+            data = await websocket.receive_json()
+            if data.get("type") == "point_prompt":
+                app_state["point_prompt"] = data.get("points")
+                app_state["prompt"] = None # Clear text prompt
+                print(f"Received point prompt: {app_state['point_prompt']}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

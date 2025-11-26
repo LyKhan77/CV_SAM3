@@ -1,7 +1,9 @@
-docs/
+
 
 venv/
 
 *venv/
 
 __pycache__/
+
+*__pycache__/
