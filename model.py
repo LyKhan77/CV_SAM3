@@ -11,12 +11,11 @@ import torch.nn.functional as F
 def draw_masks(frame, masks, display_mode):
     """
     Draw masks on frame based on display mode.
-    Expects masks as a list of binary numpy arrays (uint8).
+    Expects masks as a list of binary numpy arrays (uint8) sized to original frame.
     """
     if not masks:
         return
     
-    # Colors for bounding boxes/masks
     color = (0, 255, 0) # Green
     
     for i, mask in enumerate(masks):
@@ -26,6 +25,10 @@ def draw_masks(frame, masks, display_mode):
                 mask = (mask > 127).astype(np.uint8)
             else:
                 mask = (mask > 0).astype(np.uint8)
+            
+            # If mask size doesn't match frame, resize it (final safety net)
+            if mask.shape[:2] != frame.shape[:2]:
+                mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
                 
             if display_mode == "bounding_box":
                 x, y, w, h = cv2.boundingRect(mask)
@@ -38,7 +41,6 @@ def draw_masks(frame, masks, display_mode):
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 if contours:
                     cv2.drawContours(frame, contours, -1, color, 2)
-                    # Add semi-transparent fill
                     overlay = frame.copy()
                     cv2.drawContours(overlay, contours, -1, color, -1)
                     cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
@@ -46,67 +48,68 @@ def draw_masks(frame, masks, display_mode):
         except Exception as e:
             print(f"[ERROR] Draw mask failed: {e}")
 
-def process_sam3_outputs_simple(outputs, target_size, confidence_threshold):
+def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold):
     """
-    Simplified post-processing: manually resize and threshold logits.
-    target_size: (height, width)
+    Memory-optimized post-processing.
+    1. Filter masks based on IoU scores FIRST (while small).
+    2. Only resize passing masks.
+    3. Handle tensor operations efficiently.
     """
     try:
-        # 1. Get logits
-        # Output shape usually: [batch, num_masks, height, width]
-        pred_masks = outputs.pred_masks
+        # 1. Get logits and scores
+        # [batch, num_masks, height, width] -> remove batch
+        pred_masks = outputs.pred_masks.squeeze(0) 
         
-        # Remove batch dim if present
-        if len(pred_masks.shape) == 4:
-            pred_masks = pred_masks.squeeze(0)
+        # Get scores for filtering
+        if hasattr(outputs, 'iou_scores'):
+            scores = outputs.iou_scores.squeeze(0).squeeze(-1) # [num_masks]
+        else:
+            # Fallback if no scores
+            scores = torch.ones(pred_masks.shape[0], device=pred_masks.device)
+
+        # 2. FILTER FIRST (Crucial for Memory)
+        # Find indices of masks that pass the threshold
+        keep_indices = torch.where(scores > confidence_threshold)[0]
+        
+        if len(keep_indices) == 0:
+            return []
             
-        # 2. Resize masks to original image size
-        # Add batch and channel dims for interpolation: [1, 1, H, W] -> [num_masks, 1, H, W]
-        # We iterate or do batch resize. Batch is faster.
-        if pred_masks.dim() == 3:
-            pred_masks = pred_masks.unsqueeze(1) # [num_masks, 1, H, W]
-            
+        # Keep only good masks (still small resolution)
+        filtered_masks = pred_masks[keep_indices]
+        
+        # 3. Resize ONLY the good masks
+        # Add batch/channel dims: [num_good, H, W] -> [1, num_good, H, W] for interpolate
+        filtered_masks = filtered_masks.unsqueeze(0)
+        
+        # Resize to target size (High VRAM usage here, but now for fewer masks)
         resized_masks = F.interpolate(
-            pred_masks,
+            filtered_masks,
             size=target_size,
             mode="bilinear",
             align_corners=False
-        ).squeeze(1) # Back to [num_masks, H, W]
+        ).squeeze(0) # Back to [num_good, H, W]
         
-        # 3. Apply sigmoid and threshold
+        # 4. Sigmoid and Binarize
         probs = torch.sigmoid(resized_masks)
-        binary_masks = (probs > confidence_threshold).float()
+        binary_masks = (probs > 0.5).float() # Standard threshold for mask
         
-        # 4. Filter and convert to numpy list
+        # 5. Convert to Numpy list for drawing
         final_masks = []
+        binary_masks_np = binary_masks.cpu().numpy() # Move to CPU only at the end
         
-        # Get IoU scores if available for filtering
-        if hasattr(outputs, 'iou_scores'):
-            scores = outputs.iou_scores.squeeze().cpu().numpy()
-            if scores.ndim == 0: scores = [scores] # Handle single mask case
-        else:
-            scores = [1.0] * len(binary_masks)
-            
-        binary_masks_np = binary_masks.cpu().numpy()
-        
-        for i, mask in enumerate(binary_masks_np):
-            # Filter by score/confidence
-            if i < len(scores) and scores[i] < confidence_threshold:
+        for mask in binary_masks_np:
+            if mask.sum() < 100: # Filter very small noise
                 continue
-                
-            # Filter empty masks
-            if mask.sum() < 10:
-                continue
-                
-            # Convert to uint8 (0-255) for OpenCV
             final_masks.append((mask * 255).astype(np.uint8))
             
         return final_masks
 
     except Exception as e:
-        print(f"[ERROR] Simple post-processing failed: {e}")
+        print(f"[ERROR] Optimized post-processing failed: {e}")
         import traceback
         traceback.print_exc()
+        # Clean up memory on error
+        torch.cuda.empty_cache()
         return []
 
 def load_model():
@@ -129,7 +132,9 @@ async def video_processing_loop(manager, app_state):
     print("--- Video Processing Loop Started ---")
     video_capture = None
     frame_counter = 0
-    PROCESS_EVERY_N_FRAMES = 1 # Can be increased for RTSP to reduce lag
+    
+    # Reduce input size to save VRAM (Max dimension)
+    MAX_INPUT_SIZE = 1024 
 
     while True:
         rtsp_url = app_state.get("rtsp_url")
@@ -140,14 +145,13 @@ async def video_processing_loop(manager, app_state):
         
         frame = None
         
-        # 1. Acquire Frame
+        # 1. Acquire Frame logic (same as before)
         if uploaded_image_path and not rtsp_url:
             if video_capture: video_capture.release(); video_capture = None
             frame = cv2.imread(uploaded_image_path)
             if frame is None: 
                 await asyncio.sleep(1)
-                continue
-                
+                continue     
         elif rtsp_url and not uploaded_image_path:
             if video_capture is None:
                 try:
@@ -158,7 +162,6 @@ async def video_processing_loop(manager, app_state):
                     video_capture = None
                     await asyncio.sleep(2)
                     continue
-            
             ret, frame = video_capture.read()
             if not ret:
                 video_capture.release(); video_capture = None
@@ -176,18 +179,29 @@ async def video_processing_loop(manager, app_state):
         display_mode = app_state.get("display_mode", "segmentation")
         
         should_process = (model and processor and (prompt or point_prompt))
-        if rtsp_url: # Skip frames for RTSP to keep up
+        if rtsp_url:
              should_process = should_process and (frame_counter % 5 == 0)
 
         if should_process:
-            image_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            target_size = (image_pil.height, image_pil.width)
-            inputs = None
+            # Save original dimensions for drawing later
+            orig_h, orig_w = frame.shape[:2]
             
+            # Resize frame for inference to save VRAM
+            h, w = orig_h, orig_w
+            scale = 1.0
+            if max(h, w) > MAX_INPUT_SIZE:
+                scale = MAX_INPUT_SIZE / max(h, w)
+                new_w, new_h = int(w * scale), int(h * scale)
+                frame_resized = cv2.resize(frame, (new_w, new_h))
+            else:
+                frame_resized = frame
+
+            image_pil = Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB))
+            
+            inputs = None
             try:
                 # Prepare Inputs
                 if prompt:
-                    # Text Prompt
                     inputs = processor(
                         text=[prompt],
                         images=image_pil,
@@ -195,13 +209,13 @@ async def video_processing_loop(manager, app_state):
                     ).to(device)
                 
                 elif point_prompt:
-                    # Point Prompt
-                    w, h = image_pil.size
-                    abs_x = int(point_prompt["x"] * w)
-                    abs_y = int(point_prompt["y"] * h)
+                    # Adjust point coords to resized image
+                    curr_w, curr_h = image_pil.size
+                    abs_x = int(point_prompt["x"] * curr_w)
+                    abs_y = int(point_prompt["y"] * curr_h)
                     inputs = processor(
                         images=image_pil,
-                        input_points=[[[abs_x, abs_y]]], # Batch size 1, 1 point
+                        input_points=[[[abs_x, abs_y]]],
                         return_tensors="pt"
                     ).to(device)
 
@@ -210,21 +224,27 @@ async def video_processing_loop(manager, app_state):
                     with torch.no_grad():
                         outputs = model(**inputs)
                     
-                    # Process Outputs
-                    final_masks = process_sam3_outputs_simple(outputs, target_size, confidence)
+                    # Optimized Post-Processing (Target size is ORIGINAL frame size)
+                    final_masks = process_sam3_outputs_optimized(
+                        outputs, 
+                        target_size=(orig_h, orig_w), 
+                        confidence_threshold=confidence
+                    )
                     count = len(final_masks)
                     
-                    # Draw
+                    # Draw on ORIGINAL frame
                     draw_masks(frame, final_masks, display_mode)
                     
             except Exception as e:
                 print(f"[ERROR] Inference failed: {e}")
+                torch.cuda.empty_cache() # Clear memory on error
 
         # 3. Update Status & Broadcast
         status = "Approved" if count >= app_state["max_limit"] else "Waiting"
         status_color = "green" if status == "Approved" else "orange"
         
-        _, buffer = cv2.imencode('.jpg', frame)
+        # Use lower quality JPEG for stream to save bandwidth/cpu
+        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         jpg_b64 = base64.b64encode(buffer).decode('utf-8')
         
         payload = {
@@ -241,8 +261,7 @@ async def video_processing_loop(manager, app_state):
         
         await manager.broadcast(json.dumps(payload))
         
-        # Control loop speed
         if rtsp_url:
             await asyncio.sleep(0.01)
         else:
-            await asyncio.sleep(0.1) # Slower for static image to save CPU
+            await asyncio.sleep(0.1)

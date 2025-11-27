@@ -43,7 +43,8 @@ async function postData(endpoint, body) {
         return await response.json();
     } catch (e) {
         console.error(`Failed to post to ${endpoint}:`, e);
-        alert(`Error communicating with the backend. Is it running?`);
+        // Only alert for critical config failures, not routine checks
+        if (endpoint.includes('config/stream')) alert(`Error communicating with the backend. Is it running?`);
     }
 }
 
@@ -71,6 +72,22 @@ function processPrompt() {
     postData("/api/config/prompt", { object_name: inputVal }).then(data => console.log("Prompt set response:", data));
 }
 
+function stopProcessing() {
+    // Clear the prompt in the backend to stop inference
+    postData("/api/config/prompt", { object_name: "" }).then(data => {
+        console.log("Processing stopped:", data);
+        // Reset UI description
+        document.getElementById('object-description').textContent = "{Object Description}";
+        // Clear input
+        document.getElementById('prompt-input').value = "";
+        // Disable click select mode if active
+        if (document.getElementById('select-object-toggle').checked) {
+            document.getElementById('select-object-toggle').checked = false;
+            toggleClickSelectMode();
+        }
+    });
+}
+
 function updateLimit() {
     const limit = parseInt(document.getElementById('max-limit').value) || 100;
     postData("/api/config/limit", { value: limit }).then(data => console.log("Limit set response:", data));
@@ -93,16 +110,12 @@ function handleVideoClick(event) {
     const videoFeed = document.getElementById('mock-video-feed');
     const rect = videoFeed.getBoundingClientRect();
 
-    // Calculate click coordinates relative to the image's display size
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    // Normalize coordinates to the image's natural dimensions
     const normalX = x / rect.width;
     const normalY = y / rect.height;
 
-    // The backend expects coordinates based on the original video frame size.
-    // We send normalized coordinates, and the backend will scale them.
     const point_prompt = {
         type: "point_prompt",
         points: { x: normalX, y: normalY }
@@ -111,7 +124,6 @@ function handleVideoClick(event) {
     if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(point_prompt));
         document.getElementById('object-description').innerHTML = '<div class="loader"></div>';
-        // Disable click-select mode after one click
         document.getElementById('select-object-toggle').checked = false;
         toggleClickSelectMode(); 
     } else {
@@ -129,7 +141,6 @@ function toggleClickSelectMode() {
         promptInput.disabled = true;
         promptInput.placeholder = "Click on video to select object";
         promptInput.value = "";
-        // Clear text prompt in backend
         postData("/api/config/prompt", { object_name: "" });
     } else {
         videoFeed.classList.remove('cursor-crosshair');
@@ -140,10 +151,9 @@ function toggleClickSelectMode() {
 
 // --- 6. DOM Element Event Listeners ---
 document.addEventListener('DOMContentLoaded', () => {
-    // Existing listeners
     document.getElementById('max-limit').addEventListener('change', updateLimit);
     document.getElementById('sound-toggle').addEventListener('change', updateSoundSetting);
-    // New listeners
+    
     const confidenceSlider = document.getElementById('confidence-slider');
     confidenceSlider.addEventListener('input', () => {
         document.getElementById('confidence-value').textContent = `${confidenceSlider.value}%`;
@@ -158,6 +168,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('select-object-toggle').addEventListener('change', toggleClickSelectMode);
     document.getElementById('mock-video-feed').addEventListener('click', handleVideoClick);
+    
+    // Add Stop button listener
+    // Check if element exists first to avoid errors if HTML isn't updated yet
+    const stopBtn = document.getElementById('stop-processing-btn');
+    if (stopBtn) {
+        stopBtn.addEventListener('click', stopProcessing);
+    }
 });
 
 // --- 7. Dashboard Update Logic ---
@@ -170,41 +187,35 @@ function updateDashboard(data) {
     const progressLegend = document.getElementById('progress-legend');
     const videoFeed = document.getElementById('mock-video-feed');
     
-    // Animate count change
     animateValue(countEl, frontendState.currentCount, analytics.count, 500);
     frontendState.currentCount = analytics.count;
 
-    // Update video frame
     if(data.video_frame && data.video_frame.startsWith('data:image')) {
        videoFeed.src = data.video_frame;
        
-       // Add visual feedback when processing
        if (analytics.detected_object && analytics.detected_object !== "N/A") {
            videoFeed.style.border = "2px solid #003473";
-           setTimeout(() => {
-               videoFeed.style.border = "none";
-           }, 500);
+           setTimeout(() => { videoFeed.style.border = "none"; }, 500);
        }
     }
 
-    // Enhanced object description with status
     if (analytics.detected_object && analytics.detected_object !== "N/A") {
         const countText = analytics.count > 0 ? `(${analytics.count} found)` : '(searching...)';
-        descEl.innerHTML = `Detecting: <span class="font-bold text-primary">${analytics.detected_object}</span> <span class="text-sm text-gray-500">${countText}</span>`;
-        
-        // Add processing indicator
-        if (analytics.count === 0) {
-            descEl.innerHTML += '<div class="loader ml-2" style="display: inline-block; width: 16px; height: 16px; border-width: 2px;"></div>';
+        // Only update HTML if it's different to avoid re-rendering loops/flicker
+        const newHTML = `Detecting: <span class="font-bold text-primary">${analytics.detected_object}</span> <span class="text-sm text-gray-500">${countText}</span>`;
+        if (!descEl.innerHTML.includes(analytics.detected_object)) {
+             descEl.innerHTML = newHTML;
+             if (analytics.count === 0) {
+                descEl.innerHTML += '<div class="loader ml-2" style="display: inline-block; width: 16px; height: 16px; border-width: 2px;"></div>';
+            }
         }
-    } else if (analytics.detected_object === null) {
+    } else if (analytics.detected_object === null || analytics.detected_object === "") {
         descEl.textContent = "{Object Description}";
     }
     
-    // Update progress bar with smooth animation
     let percentage = (analytics.count / analytics.max_limit) * 100;
     if (percentage > 100) percentage = 100;
     
-    // Add color coding based on percentage
     progressBar.style.width = `${percentage}%`;
     if (percentage >= 100) {
         progressBar.className = "bg-red-600 h-3 rounded-full transition-all duration-500";
@@ -217,40 +228,24 @@ function updateDashboard(data) {
     progressLegend.textContent = `${analytics.count}/${analytics.max_limit}`;
     document.getElementById('max-limit').value = analytics.max_limit;
 
-    // Enhanced status badge with animations
     statusBadge.textContent = analytics.status;
     const statusColor = analytics.status_color.toLowerCase();
     
-    // Remove all status classes first
     statusBadge.className = "px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-all duration-300";
     
     if (statusColor === 'success' || statusColor === 'green' || statusColor === 'approved') {
         statusBadge.classList.add('bg-green-200', 'text-green-800');
-        progressBar.classList.remove('bg-red-600', 'bg-orange-500');
-        progressBar.classList.add('bg-primary');
     } else if (statusColor === 'orange' || statusColor === 'waiting') {
         statusBadge.classList.add('bg-orange-200', 'text-orange-800');
-        progressBar.classList.remove('bg-red-600', 'bg-orange-500');
-        progressBar.classList.add('bg-primary');
     } else {
         statusBadge.classList.add('bg-red-200', 'text-red-800', 'animate-pulse');
-        progressBar.classList.remove('bg-primary', 'bg-orange-500');
-        progressBar.classList.add('bg-red-600');
     }
 
-    // Trigger sound notification if needed
     if (analytics.trigger_sound) {
         triggerNotification();
-        
-        // Add visual notification
         document.body.style.backgroundColor = '#fef2f2';
-        setTimeout(() => {
-            document.body.style.backgroundColor = '#F8F9FA';
-        }, 200);
+        setTimeout(() => { document.body.style.backgroundColor = '#F8F9FA'; }, 200);
     }
-    
-    // Console logging for debugging
-    console.log(`[UI Update] Object: ${analytics.detected_object}, Count: ${analytics.count}, Status: ${analytics.status}`);
 }
 
 function triggerNotification() {
@@ -282,7 +277,6 @@ function setupImageUpload() {
     fileInput.addEventListener('change', handleFileSelect);
     clearBtn.addEventListener('click', clearUploadedImage);
 
-    // Drag and drop functionality
     uploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
         uploadArea.classList.add('border-primary', 'bg-primary/10');
@@ -310,12 +304,10 @@ function handleFileSelect(e) {
 }
 
 function handleFile(file) {
-    // Validate file type and size
     if (!file.type.startsWith('image/')) {
         alert('Please select an image file');
         return;
     }
-
     if (file.size > 10 * 1024 * 1024) {
         alert('File size must be less than 10MB');
         return;
@@ -324,7 +316,6 @@ function handleFile(file) {
     const formData = new FormData();
     formData.append('file', file);
 
-    // Show loading state
     document.getElementById('image-upload-area').innerHTML = `
         <i class="fa-solid fa-spinner fa-spin text-gray-400 text-4xl mb-3"></i>
         <p class="text-gray-600 font-medium">Uploading...</p>
@@ -336,21 +327,7 @@ function handleFile(file) {
     })
     .then(response => response.json())
     .then(data => {
-        // Restore upload area
-        document.getElementById('image-upload-area').innerHTML = `
-            <input type="file" id="image-input" accept=".jpeg,.jpg,.png" class="hidden">
-            <i class="fa-solid fa-cloud-upload-alt text-gray-400 text-4xl mb-3"></i>
-            <p class="text-gray-600 font-medium">Click to upload image</p>
-            <p class="text-gray-400 text-sm">or drag and drop</p>
-            <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 10MB</p>
-        `;
-
-        // Re-attach event listener
-        document.getElementById('image-input').addEventListener('change', handleFileSelect);
-        document.getElementById('image-upload-area').addEventListener('click', () => {
-            document.getElementById('image-input').click();
-        });
-
+        resetUploadArea();
         if (data.status === 'success') {
             displayUploadedImage(file);
             console.log('Image uploaded successfully:', data.message);
@@ -361,15 +338,21 @@ function handleFile(file) {
     .catch(error => {
         console.error('Upload error:', error);
         alert('Upload failed');
+        resetUploadArea();
+    });
+}
 
-        // Restore upload area on error
-        document.getElementById('image-upload-area').innerHTML = `
-            <input type="file" id="image-input" accept=".jpeg,.jpg,.png" class="hidden">
-            <i class="fa-solid fa-cloud-upload-alt text-gray-400 text-4xl mb-3"></i>
-            <p class="text-gray-600 font-medium">Click to upload image</p>
-            <p class="text-gray-400 text-sm">or drag and drop</p>
-            <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 10MB</p>
-        `;
+function resetUploadArea() {
+    document.getElementById('image-upload-area').innerHTML = `
+        <input type="file" id="image-input" accept=".jpeg,.jpg,.png" class="hidden">
+        <i class="fa-solid fa-cloud-upload-alt text-gray-400 text-4xl mb-3"></i>
+        <p class="text-gray-600 font-medium">Click to upload image</p>
+        <p class="text-gray-400 text-sm">or drag and drop</p>
+        <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 10MB</p>
+    `;
+    document.getElementById('image-input').addEventListener('change', handleFileSelect);
+    document.getElementById('image-upload-area').addEventListener('click', () => {
+        document.getElementById('image-input').click();
     });
 }
 
@@ -385,7 +368,7 @@ function displayUploadedImage(file) {
         document.getElementById('mock-video-feed').src = e.target.result;
         document.getElementById('mock-video-feed').classList.remove('hidden');
         document.getElementById('stream-placeholder').classList.add('hidden');
-        document.getElementById('live-indicator').classList.add('hidden');
+        document.getElementById('live-indicator').classList.add('hidden'); // Hide LIVE indicator for static image
     };
     reader.readAsDataURL(file);
 }
@@ -393,8 +376,22 @@ function displayUploadedImage(file) {
 function clearUploadedImage() {
     postData("/api/config/clear-image", {}).then(data => {
         if (data.status === 'success') {
+            // Hide preview
             document.getElementById('image-preview-container').classList.add('hidden');
             document.getElementById('image-input').value = '';
+            
+            // Reset video feed area to default state
+            document.getElementById('mock-video-feed').classList.add('hidden');
+            document.getElementById('mock-video-feed').src = ""; 
+            document.getElementById('stream-placeholder').classList.remove('hidden');
+            
+            // Restore LIVE indicator if RTSP was active (logic could be refined, but simple reset is safer)
+            document.getElementById('live-indicator').classList.add('hidden');
+            document.getElementById('stream-placeholder').innerHTML = `
+                <i class="fa-regular fa-circle-play text-gray-400 text-6xl mb-4 group-hover:text-primary transition-colors"></i>
+                <p class="text-gray-400 font-medium">&lt;Camera RTSP Live Stream&gt;</p>
+            `;
+            
             console.log('Image cleared');
         }
     });
@@ -406,16 +403,12 @@ function setupSmartPromptDropdown() {
     const dropdownToggle = document.getElementById('dropdown-toggle');
     const suggestionsPanel = document.getElementById('object-suggestions');
 
-    // Toggle dropdown
     dropdownToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         const isHidden = suggestionsPanel.classList.contains('hidden');
         if (isHidden) {
             suggestionsPanel.classList.remove('hidden');
-            // Position dropdown correctly
             const inputRect = promptInput.getBoundingClientRect();
-            const parentRect = promptInput.parentElement.getBoundingClientRect();
-
             suggestionsPanel.style.width = '100%';
             suggestionsPanel.style.left = '0';
             suggestionsPanel.style.top = `${inputRect.height + 4}px`;
@@ -425,7 +418,6 @@ function setupSmartPromptDropdown() {
         }
     });
 
-    // Handle suggestion clicks
     document.querySelectorAll('.suggestion-item').forEach(item => {
         item.addEventListener('click', (e) => {
             promptInput.value = e.target.textContent.trim();
@@ -434,25 +426,13 @@ function setupSmartPromptDropdown() {
         });
     });
 
-    // Close dropdown when clicking outside
-    document.addEventListener('click', () => {
-        suggestionsPanel.classList.add('hidden');
-    });
-
-    // Prevent dropdown close when clicking inside
-    suggestionsPanel.addEventListener('click', (e) => {
-        e.stopPropagation();
-    });
-
-    // Close dropdown on escape key
+    document.addEventListener('click', () => suggestionsPanel.classList.add('hidden'));
+    suggestionsPanel.addEventListener('click', (e) => e.stopPropagation());
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            suggestionsPanel.classList.add('hidden');
-        }
+        if (e.key === 'Escape') suggestionsPanel.classList.add('hidden');
     });
 }
 
-// Initialize image upload and smart dropdown on DOM load
 document.addEventListener('DOMContentLoaded', () => {
     setupImageUpload();
     setupSmartPromptDropdown();

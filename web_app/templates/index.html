@@ -292,7 +292,12 @@
                 
                 <!-- Description Panel -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col h-auto min-h-[200px]">
-                    <h3 class="text-xl font-bold text-primary mb-4">Description</h3>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-bold text-primary">Description</h3>
+                        <button id="stop-processing-btn" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1 px-3 rounded transition-colors">
+                            STOP
+                        </button>
+                    </div>
                     <div class="bg-gray-50 border border-gray-100 rounded-xl flex-1 p-6 flex items-center justify-center text-center overflow-hidden">
                         <p id="object-description" class="text-2xl font-bold text-gray-400 transition-all duration-300">
                             {Object Description}
