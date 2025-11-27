@@ -6,13 +6,15 @@ Pillow==12.0.0
 
 # PyTorch with CUDA 12.1 support
 --extra-index-url https://download.pytorch.org/whl/cu128
-torch
-torchvision
+torch>=2.5.1
+torchvision>=0.20.1
 
-# For SAM (Segment Anything Model)
-# Install with: pip install git+https://github.com/facebookresearch/segment-anything.git
-# segment-anything
+# SAM 2 (Segment Anything Model 2)
+# Install with: pip install git+https://github.com/facebookresearch/sam2.git
+git+https://github.com/facebookresearch/sam2.git
 
-# Optional: For full text-to-box functionality
-# Install with: pip install git+https://github.com/IDEA-Research/GroundingDINO.git
-# groundingdino
+# CLIP for object classification
+# Install with: pip install git+https://github.com/openai/CLIP.git
+git+https://github.com/openai/CLIP.git
+ftfy
+regex

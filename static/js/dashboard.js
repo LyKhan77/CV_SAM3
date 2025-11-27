@@ -2,6 +2,11 @@
 let currentImageFile = null;
 let isProcessing = false;
 
+// Instant segmentation state (Select Object mode)
+let segmentedObjects = [];
+let currentObjectId = 0;
+let isSegmenting = false;
+
 // DOM elements
 const uploadArea = document.getElementById('uploadArea');
 const imageInput = document.getElementById('imageInput');
@@ -25,6 +30,17 @@ const removeImageBtn = document.getElementById('removeImageBtn');
 const promptModal = document.getElementById('promptModal');
 const howToPromptBtn = document.getElementById('howToPromptBtn');
 const closeModalBtn = document.getElementById('closeModalBtn');
+
+// Model Configuration elements
+const confidenceSlider = document.getElementById('confidenceSlider');
+const confidenceValue = document.getElementById('confidenceValue');
+const selectObjectToggle = document.getElementById('selectObjectToggle');
+const modeDescription = document.getElementById('modeDescription');
+
+// Click mode state
+let detectionMode = 'text'; // 'text' or 'click'
+let clickedPoints = [];
+let clickMarkers = [];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -100,6 +116,25 @@ function setupEventListeners() {
             promptModal.classList.add('hidden');
         }
     });
+
+    // Model Configuration handlers
+    confidenceSlider.addEventListener('input', (e) => {
+        confidenceValue.textContent = e.target.value;
+    });
+
+    selectObjectToggle.addEventListener('change', (e) => {
+        detectionMode = e.target.checked ? 'click' : 'text';
+
+        if (detectionMode === 'click') {
+            modeDescription.textContent = 'Select Object mode: Click objects to instantly segment and identify';
+            enableClickMode();
+            updateRunButtonForMode('click');
+        } else {
+            modeDescription.textContent = 'Text mode: Enter prompt to auto-detect objects';
+            disableClickMode();
+            updateRunButtonForMode('text');
+        }
+    });
 }
 
 function handleFileSelect(e) {
@@ -158,6 +193,9 @@ function handleRemoveImage() {
     // Clear thumbnail and filename
     imageThumbnail.src = '';
     imageFileName.textContent = '';
+
+    // Clear click markers if in click mode
+    clearClickMarkers();
 }
 
 async function handleRunAnalysis() {
@@ -167,27 +205,40 @@ async function handleRunAnalysis() {
         return;
     }
 
-    const prompt = promptInput.value.trim();
-    if (!prompt) {
-        alert('Please enter an object name to detect');
-        promptInput.focus();
-        return;
-    }
-
     if (isProcessing) {
         return;
     }
 
+    // Route to appropriate mode
+    if (detectionMode === 'click') {
+        if (clickedPoints.length === 0) {
+            alert('Please click on objects in the image first');
+            return;
+        }
+        await runClickDetection();
+    } else {
+        // Text mode
+        const prompt = promptInput.value.trim();
+        if (!prompt) {
+            alert('Please enter an object name to detect');
+            promptInput.focus();
+            return;
+        }
+        await runTextDetection(prompt);
+    }
+}
+
+async function runTextDetection(prompt) {
     isProcessing = true;
     setLoadingState(true);
 
     try {
-        // Prepare form data
         const formData = new FormData();
         formData.append('file', currentImageFile);
         formData.append('prompt', prompt);
+        formData.append('mode', 'text');
+        formData.append('confidence', confidenceSlider.value);
 
-        // Send request
         const response = await fetch('/analyze', {
             method: 'POST',
             body: formData
@@ -196,18 +247,48 @@ async function handleRunAnalysis() {
         const result = await response.json();
 
         if (result.success) {
-            // Update image with processed result
             previewImage.src = result.data.result_image_url;
-
-            // Update count display
-            const detectedCount = result.data.detected_count;
-            countDisplay.textContent = detectedCount;
-
-            // Update progress bar and status
-            updateProgressBar(detectedCount);
+            countDisplay.textContent = result.data.detected_count;
+            updateProgressBar(result.data.detected_count);
             updateStatusDisplay();
+            console.log('Analysis complete:', result.message);
+        } else {
+            alert('Error: ' + result.error);
+        }
 
-            // Show success message
+    } catch (error) {
+        console.error('Error during analysis:', error);
+        alert('An error occurred while processing the image. Please try again.');
+    } finally {
+        isProcessing = false;
+        setLoadingState(false);
+    }
+}
+
+async function runClickDetection() {
+    isProcessing = true;
+    setLoadingState(true);
+
+    try {
+        const formData = new FormData();
+        formData.append('file', currentImageFile);
+        formData.append('mode', 'click');
+        formData.append('points', JSON.stringify(clickedPoints));
+        formData.append('confidence', confidenceSlider.value);
+
+        const response = await fetch('/analyze', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            previewImage.src = result.data.result_image_url;
+            countDisplay.textContent = result.data.detected_count;
+            updateProgressBar(result.data.detected_count);
+            updateStatusDisplay();
+            clearClickMarkers(); // Clear markers after processing
             console.log('Analysis complete:', result.message);
         } else {
             alert('Error: ' + result.error);
@@ -282,4 +363,331 @@ function updateDateTime() {
 
     document.querySelectorAll('header .text-right div')[0].textContent = timeStr;
     document.querySelectorAll('header .text-right div')[1].textContent = dateStr;
+}
+
+// Click mode functions
+function enableClickMode() {
+    previewImage.style.cursor = 'crosshair';
+    previewImage.addEventListener('click', handleImageClick);
+}
+
+function disableClickMode() {
+    previewImage.style.cursor = 'default';
+    previewImage.removeEventListener('click', handleImageClick);
+    clearClickMarkers();
+    clearAllSegments();
+}
+
+function updateRunButtonForMode(mode) {
+    if (mode === 'click') {
+        // Change Run button to Clear Segments button
+        runButton.innerHTML = `
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+            </svg>
+            Clear Segments
+        `;
+        runButton.onclick = (e) => {
+            e.preventDefault();
+            clearAllSegments();
+        };
+    } else {
+        // Reset to Run button
+        runButton.innerHTML = `
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z"/>
+            </svg>
+            Run
+        `;
+        runButton.onclick = (e) => {
+            e.preventDefault();
+            handleRunAnalysis();
+        };
+    }
+}
+
+async function handleImageClick(e) {
+    if (isSegmenting) {
+        return; // Prevent multiple simultaneous clicks
+    }
+
+    const rect = previewImage.getBoundingClientRect();
+    const scaleX = previewImage.naturalWidth / rect.width;
+    const scaleY = previewImage.naturalHeight / rect.height;
+
+    const x = Math.round((e.clientX - rect.left) * scaleX);
+    const y = Math.round((e.clientY - rect.top) * scaleY);
+
+    const displayX = e.clientX - rect.left;
+    const displayY = e.clientY - rect.top;
+
+    // Instant segmentation - process immediately
+    await performInstantSegmentation({x, y, label: 1}, displayX, displayY);
+}
+
+function addClickMarker(x, y) {
+    const marker = document.createElement('div');
+    marker.className = 'absolute w-3 h-3 bg-red-500 rounded-full border-2 border-white';
+    marker.style.left = `${x - 6}px`;
+    marker.style.top = `${y - 6}px`;
+    marker.style.pointerEvents = 'none';
+
+    const container = previewImage.parentElement;
+    container.style.position = 'relative';
+    container.appendChild(marker);
+
+    clickMarkers.push(marker);
+
+    return marker;  // IMPORTANT: Return the marker element
+}
+
+function clearClickMarkers() {
+    clickMarkers.forEach(marker => marker.remove());
+    clickMarkers = [];
+    clickedPoints = [];
+}
+
+// Instant segmentation functions (Select Object mode)
+async function performInstantSegmentation(point, displayX, displayY) {
+    if (!currentImageFile) {
+        return;
+    }
+
+    isSegmenting = true;
+
+    // Show loading cursor
+    previewImage.style.cursor = 'wait';
+
+    try {
+        // Show temporary loading marker at click point
+        const loadingMarker = addClickMarker(displayX, displayY);
+        loadingMarker.classList.add('animate-pulse');
+
+        const formData = new FormData();
+        formData.append('file', currentImageFile);
+        formData.append('x', point.x);
+        formData.append('y', point.y);
+
+        const response = await fetch('/analyze/instant', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        // Remove loading marker
+        loadingMarker.remove();
+        clickMarkers = clickMarkers.filter(m => m !== loadingMarker);
+
+        if (result.success) {
+            const data = result.data;
+
+            // Check for IoU overlap with existing objects
+            const overlappingObject = findOverlappingObject(data.bbox);
+
+            if (overlappingObject) {
+                console.log(`Object overlaps with existing object #${overlappingObject.id} - skipping`);
+                return;
+            }
+
+            // Add new segmented object
+            const objectId = currentObjectId++;
+            segmentedObjects.push({
+                id: objectId,
+                bbox: data.bbox,
+                label: data.object_label,
+                confidence: data.confidence,
+                mask: data.mask,
+                mask_shape: data.mask_shape,
+                top_3: data.top_3,
+                displayX: displayX,
+                displayY: displayY
+            });
+
+            // Render overlay on canvas
+            renderSegmentOverlay(objectId, data);
+
+            // Update count display
+            updateSegmentCount();
+
+            console.log(`Object #${objectId}: ${data.object_label} (${(data.confidence * 100).toFixed(1)}%)`);
+        } else {
+            console.error('Instant segmentation failed:', result.error);
+            alert('Segmentation failed: ' + result.error);
+        }
+
+    } catch (error) {
+        console.error('Error during instant segmentation:', error);
+        alert('An error occurred. Please try again.');
+    } finally {
+        isSegmenting = false;
+        previewImage.style.cursor = 'crosshair';
+    }
+}
+
+function findOverlappingObject(newBbox) {
+    // Check IoU (Intersection over Union) with existing objects
+    for (const obj of segmentedObjects) {
+        const iou = calculateIoU(newBbox, obj.bbox);
+        if (iou > 0.5) {
+            // >50% overlap - consider as same object
+            return obj;
+        }
+    }
+    return null;
+}
+
+function calculateIoU(bbox1, bbox2) {
+    // bbox format: [x1, y1, x2, y2]
+    const [x1_1, y1_1, x2_1, y2_1] = bbox1;
+    const [x1_2, y1_2, x2_2, y2_2] = bbox2;
+
+    // Calculate intersection area
+    const x_left = Math.max(x1_1, x1_2);
+    const y_top = Math.max(y1_1, y1_2);
+    const x_right = Math.min(x2_1, x2_2);
+    const y_bottom = Math.min(y2_1, y2_2);
+
+    if (x_right < x_left || y_bottom < y_top) {
+        return 0.0; // No intersection
+    }
+
+    const intersection = (x_right - x_left) * (y_bottom - y_top);
+
+    // Calculate union area
+    const area1 = (x2_1 - x1_1) * (y2_1 - y1_1);
+    const area2 = (x2_2 - x1_2) * (y2_2 - y1_2);
+    const union = area1 + area2 - intersection;
+
+    return intersection / union;
+}
+
+function renderSegmentOverlay(objectId, data) {
+    // Create canvas overlay for this segment
+    const container = previewImage.parentElement;
+
+    // Ensure container is positioned
+    if (!container.style.position || container.style.position === 'static') {
+        container.style.position = 'relative';
+    }
+
+    // Check if canvas already exists
+    let canvas = container.querySelector('canvas.segment-overlay');
+
+    if (!canvas) {
+        // Create canvas matching image size
+        canvas = document.createElement('canvas');
+        canvas.className = 'segment-overlay absolute top-0 left-0 pointer-events-none';
+        canvas.style.zIndex = '10';
+
+        const rect = previewImage.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+
+        container.appendChild(canvas);
+    }
+
+    const ctx = canvas.getContext('2d');
+
+    // Decode mask from base64
+    const maskBytes = Uint8Array.from(atob(data.mask), c => c.charCodeAt(0));
+    const [maskHeight, maskWidth] = data.mask_shape;
+
+    // Scale bbox to canvas coordinates
+    const rect = previewImage.getBoundingClientRect();
+    const scaleX = rect.width / previewImage.naturalWidth;
+    const scaleY = rect.height / previewImage.naturalHeight;
+
+    const [x1, y1, x2, y2] = data.bbox;
+    const canvasX1 = x1 * scaleX;
+    const canvasY1 = y1 * scaleY;
+    const canvasX2 = x2 * scaleX;
+    const canvasY2 = y2 * scaleY;
+
+    // Draw semi-transparent overlay
+    const color = getSegmentColor(objectId);
+    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, 0.3)`;
+    ctx.fillRect(canvasX1, canvasY1, canvasX2 - canvasX1, canvasY2 - canvasY1);
+
+    // Draw bounding box
+    ctx.strokeStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(canvasX1, canvasY1, canvasX2 - canvasX1, canvasY2 - canvasY1);
+
+    // Draw label
+    const label = `${data.object_label} (${(data.confidence * 100).toFixed(0)}%)`;
+    ctx.font = 'bold 14px Arial';
+    ctx.fillStyle = 'white';
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 3;
+
+    const centerX = (canvasX1 + canvasX2) / 2;
+    const centerY = (canvasY1 + canvasY2) / 2;
+
+    ctx.strokeText(label, centerX - ctx.measureText(label).width / 2, centerY);
+    ctx.fillText(label, centerX - ctx.measureText(label).width / 2, centerY);
+}
+
+function getSegmentColor(index) {
+    // Color palette for overlays
+    const colors = [
+        { r: 0, g: 52, b: 115 },   // Primary color
+        { r: 255, g: 140, b: 0 },  // Orange
+        { r: 0, g: 255, b: 0 },    // Green
+        { r: 255, g: 0, b: 0 },    // Red
+        { r: 255, g: 255, b: 0 },  // Yellow
+        { r: 255, g: 0, b: 255 },  // Magenta
+    ];
+    return colors[index % colors.length];
+}
+
+function updateSegmentCount() {
+    const count = segmentedObjects.length;
+    countDisplay.textContent = count;
+    updateProgressBar(count);
+    updateStatusDisplay();
+    updateDescription();  // Update description panel with object labels
+}
+
+function updateDescription() {
+    // Find the description paragraph element
+    const descriptionPanel = document.querySelector('.bg-white.rounded-xl.shadow-sm .bg-gray-50 p');
+
+    if (!descriptionPanel) {
+        console.error('Description panel not found');
+        return;
+    }
+
+    if (segmentedObjects.length === 0) {
+        descriptionPanel.textContent = '{Object Description}';
+    } else if (segmentedObjects.length === 1) {
+        descriptionPanel.textContent = `Detected: ${segmentedObjects[0].label}`;
+    } else {
+        // Multiple objects - show unique labels
+        const uniqueLabels = [...new Set(segmentedObjects.map(obj => obj.label))];
+        descriptionPanel.textContent = `Detected: ${uniqueLabels.join(', ')}`;
+    }
+}
+
+function clearAllSegments() {
+    // Remove canvas overlay
+    const container = previewImage.parentElement;
+    const canvas = container.querySelector('canvas.segment-overlay');
+    if (canvas) {
+        canvas.remove();
+    }
+
+    // Clear state
+    segmentedObjects = [];
+    currentObjectId = 0;
+
+    // Reset count and description
+    countDisplay.textContent = '{Count}';
+    updateProgressBar(0);
+    updateStatusDisplay();
+    updateDescription();  // Reset description to placeholder
+
+    console.log('All segments cleared');
 }

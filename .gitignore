@@ -53,3 +53,14 @@ model/weights/*.pt
 
 # Logs
 *.log
+
+.claude/
+console-log.md
+
+*md
+.png
+*png
+
+UI/
+
+sample/

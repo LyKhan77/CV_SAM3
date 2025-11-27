@@ -129,8 +129,49 @@
 
             </div>
 
-            <!-- Right Column - Description & Summary -->
+            <!-- Right Column - Model Configuration, Description & Summary -->
             <div class="lg:col-span-4 space-y-6">
+
+                <!-- Model Configuration Card -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="text-xl font-bold text-[#003473] mb-4">Model Configuration</h3>
+
+                    <!-- Model Name Display -->
+                    <div class="mb-4">
+                        <label class="text-sm font-medium text-gray-700 mb-2 block">Model Name:</label>
+                        <div class="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                            <span id="modelName" class="text-gray-700 font-medium">SAM ViT-L</span>
+                        </div>
+                    </div>
+
+                    <!-- Confidence Threshold Slider -->
+                    <div class="mb-4">
+                        <label class="text-sm font-medium text-gray-700 mb-2 block">
+                            Confidence Threshold: <span id="confidenceValue" class="text-[#003473]">0.3</span>
+                        </label>
+                        <input
+                            type="range"
+                            id="confidenceSlider"
+                            min="0.1"
+                            max="0.9"
+                            step="0.05"
+                            value="0.3"
+                            class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#003473]"
+                        >
+                    </div>
+
+                    <!-- Select Object Mode Toggle -->
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="text-sm font-medium text-gray-700">Select Object Mode</label>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="selectObjectToggle" class="sr-only peer">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#003473]"></div>
+                        </label>
+                    </div>
+                    <p id="modeDescription" class="text-xs text-gray-500">
+                        Text mode: Enter prompt to auto-detect objects
+                    </p>
+                </div>
 
                 <!-- Description Card -->
                 <div class="bg-white rounded-xl shadow-sm p-6">
