@@ -34,8 +34,12 @@ def draw_masks(frame, masks, display_mode):
                 x, y, w, h = cv2.boundingRect(mask)
                 if w > 0 and h > 0:
                     cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-                    cv2.putText(frame, f"Obj {i+1}", (x, y-5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    # Draw ID background for readability
+                    label = f"#{i+1}"
+                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                    cv2.rectangle(frame, (x, y - 20), (x + tw + 4, y), color, -1)
+                    cv2.putText(frame, label, (x + 2, y - 5), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
             else:
                 # Segmentation mode
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -44,6 +48,18 @@ def draw_masks(frame, masks, display_mode):
                     overlay = frame.copy()
                     cv2.drawContours(overlay, contours, -1, color, -1)
                     cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
+                    
+                    # Calculate center for ID
+                    M = cv2.moments(contours[0])
+                    if M["m00"] != 0:
+                        cX = int(M["m10"] / M["m00"])
+                        cY = int(M["m01"] / M["m00"])
+                        # Draw ID
+                        label = f"#{i+1}"
+                        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                        cv2.rectangle(frame, (cX - tw//2 - 2, cY - th//2 - 2), (cX + tw//2 + 2, cY + th//2 + 2), (0,255,0), -1) # Green bg
+                        cv2.putText(frame, label, (cX - tw//2, cY + th//2), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
                     
         except Exception as e:
             print(f"[ERROR] Draw mask failed: {e}")
@@ -126,8 +142,10 @@ def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold, m
             
             if has_valid_object:
                 final_masks.append(final_clean_mask)
-            
-        return final_masks
+
+        # 6. Aggressive Mask Merging (Glue Logic)
+        # Combine fragmented masks (puzzle pieces) into single objects
+        return merge_overlapping_masks(final_masks)
 
     except Exception as e:
         print(f"[ERROR] Optimized post-processing failed: {e}")
@@ -135,6 +153,67 @@ def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold, m
         traceback.print_exc()
         torch.cuda.empty_cache()
         return []
+
+def merge_overlapping_masks(masks):
+    """
+    Aggressively merges masks that overlap or touch.
+    Useful for fixing fragmentation where one object is split into many parts.
+    """
+    if not masks:
+        return []
+        
+    # 1. Create a graph of connected masks
+    # Each mask is a node. Edge exists if masks overlap/touch.
+    n = len(masks)
+    parent = list(range(n))
+    
+    def find(i):
+        if parent[i] != i:
+            parent[i] = find(parent[i])
+        return parent[i]
+        
+    def union(i, j):
+        root_i = find(i)
+        root_j = find(j)
+        if root_i != root_j:
+            parent[root_i] = root_j
+
+    # Pre-dilate masks slightly to bridge small gaps
+    dilated_masks = []
+    kernel = np.ones((9,9), np.uint8) # 9x9 dilation to connect nearby pieces
+    for m in masks:
+        dilated_masks.append(cv2.dilate(m, kernel, iterations=1))
+
+    # Check for overlaps (O(N^2) but N is usually small < 100)
+    for i in range(n):
+        for j in range(i + 1, n):
+            # Check intersection
+            intersection = np.logical_and(dilated_masks[i], dilated_masks[j]).sum()
+            if intersection > 0: # Any touch after dilation triggers merge
+                union(i, j)
+                
+    # 2. Group masks by parent
+    groups = {}
+    for i in range(n):
+        root = find(i)
+        if root not in groups:
+            groups[root] = []
+        groups[root].append(masks[i])
+        
+    # 3. Fuse groups into single masks
+    merged_masks = []
+    for root in groups:
+        group_masks = groups[root]
+        if not group_masks: continue
+            
+        # Start with first mask
+        fused_mask = group_masks[0].copy()
+        for m in group_masks[1:]:
+            fused_mask = cv2.bitwise_or(fused_mask, m)
+            
+        merged_masks.append(fused_mask)
+        
+    return merged_masks
 
 def load_model():
     try:
@@ -159,14 +238,50 @@ async def video_processing_loop(manager, app_state):
     
     # Reduce input size to save VRAM (Max dimension)
     MAX_INPUT_SIZE = 1024 
+    
+    # State Cache
+    last_state_hash = None
+    last_payload = None
 
     while True:
         rtsp_url = app_state.get("rtsp_url")
         uploaded_image_path = app_state.get("uploaded_image_path")
         model = app_state.get("model")
         processor = app_state.get("processor")
+        prompt = app_state.get("prompt")
+        point_prompt = app_state.get("point_prompt")
+        confidence = app_state.get("confidence_threshold", 0.5)
+        mask_thresh = app_state.get("mask_threshold", 0.5)
+        display_mode = app_state.get("display_mode", "segmentation")
+        sound_enabled = app_state.get("sound_enabled")
+        max_limit = app_state.get("max_limit")
+        
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
+        # Generate State Hash (Tuple of all factors affecting output)
+        # For RTSP, we add frame_counter to force update. For Image, we don't.
+        current_hash = (
+            uploaded_image_path, 
+            rtsp_url, 
+            prompt, 
+            json.dumps(point_prompt) if point_prompt else None,
+            confidence, 
+            mask_thresh, 
+            display_mode,
+            sound_enabled,
+            max_limit
+        )
+        
+        # RTSP always changes
+        is_rtsp = bool(rtsp_url)
+        
+        # Check Cache (Only for Static Images)
+        if not is_rtsp and current_hash == last_state_hash and last_payload:
+            # Just broadcast the cached result to keep UI alive
+            await manager.broadcast(json.dumps(last_payload))
+            await asyncio.sleep(0.1)
+            continue
+
         frame = None
         
         # 1. Acquire Frame logic (same as before)
@@ -197,11 +312,6 @@ async def video_processing_loop(manager, app_state):
         # 2. Process Frame
         frame_counter += 1
         count = 0
-        prompt = app_state.get("prompt")
-        point_prompt = app_state.get("point_prompt")
-        confidence = app_state.get("confidence_threshold", 0.5)
-        mask_thresh = app_state.get("mask_threshold", 0.5)
-        display_mode = app_state.get("display_mode", "segmentation")
         
         should_process = (model and processor and (prompt or point_prompt))
         if rtsp_url:
@@ -284,6 +394,11 @@ async def video_processing_loop(manager, app_state):
                 "trigger_sound": (status == "Approved" and app_state["sound_enabled"])
             }
         }
+        
+        # Update Cache
+        if not is_rtsp:
+            last_state_hash = current_hash
+            last_payload = payload
         
         await manager.broadcast(json.dumps(payload))
         

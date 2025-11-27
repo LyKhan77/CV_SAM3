@@ -133,8 +133,8 @@ async def upload_image(file: UploadFile = File(...)):
         if img is None:
              return {"status": "error", "message": "Failed to decode image"}
 
-        # Resize if too large (Max 640px)
-        max_dim = 640
+        # Resize if too large (Max 1024px for better SAM performance)
+        max_dim = 1024
         h, w = img.shape[:2]
         if max(h, w) > max_dim:
             scale = max_dim / max(h, w)
