@@ -2,6 +2,8 @@ import asyncio
 import uvicorn
 import os
 import shutil
+import cv2
+import numpy as np
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import HTMLResponse
@@ -19,6 +21,7 @@ class LimitRequest(BaseModel): value: int
 class SoundRequest(BaseModel): enabled: bool
 class ModelConfigRequest(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
+    mask_threshold: float = Field(0.5, ge=0.0, le=1.0)
     display_mode: str
 
 # --- 2. Application State & WebSocket Manager ---
@@ -33,6 +36,7 @@ app_state: Dict[str, Any] = {
     "processor": None,
     # New state for model configuration
     "confidence_threshold": 0.5,
+    "mask_threshold": 0.5,
     "display_mode": "segmentation", # "segmentation" or "bounding_box"
     "select_object_mode": False,
 }
@@ -100,8 +104,9 @@ async def set_sound_toggle(request: SoundRequest):
 @app.post("/api/config/model")
 async def set_model_config(request: ModelConfigRequest):
     app_state["confidence_threshold"] = request.confidence
+    app_state["mask_threshold"] = request.mask_threshold
     app_state["display_mode"] = request.display_mode
-    print(f"Model config updated: Confidence={request.confidence}, Display={request.display_mode}")
+    print(f"Model config updated: Confidence={request.confidence}, Mask={request.mask_threshold}, Display={request.display_mode}")
     return {"status": "success", "message": "Model config updated"}
 
 @app.post("/api/upload/image")
@@ -120,8 +125,25 @@ async def upload_image(file: UploadFile = File(...)):
     # Save file
     file_path = f"uploads/{file.filename}"
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # Read file into memory
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+             return {"status": "error", "message": "Failed to decode image"}
+
+        # Resize if too large (Max 640px)
+        max_dim = 640
+        h, w = img.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            new_w, new_h = int(w * scale), int(h * scale)
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            print(f"Resized image from {w}x{h} to {new_w}x{new_h}")
+
+        # Save processed image
+        cv2.imwrite(file_path, img)
 
         # Update app state
         app_state["uploaded_image_path"] = file_path
@@ -129,7 +151,7 @@ async def upload_image(file: UploadFile = File(...)):
         app_state["prompt"] = None  # Clear existing prompts
         app_state["point_prompt"] = None
 
-        print(f"Image uploaded successfully: {file.filename}")
+        print(f"Image uploaded and processed successfully: {file.filename}")
         return {"status": "success", "message": f"Image uploaded: {file.filename}"}
 
     except Exception as e:

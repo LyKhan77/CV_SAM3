@@ -48,12 +48,14 @@ def draw_masks(frame, masks, display_mode):
         except Exception as e:
             print(f"[ERROR] Draw mask failed: {e}")
 
-def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold):
+def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold, mask_threshold=0.5):
     """
-    Memory-optimized post-processing.
-    1. Filter masks based on IoU scores FIRST (while small).
-    2. Only resize passing masks.
-    3. Handle tensor operations efficiently.
+    Memory-optimized post-processing with Enhanced Mask Quality.
+    1. Filter masks based on IoU scores FIRST.
+    2. Resize passing masks.
+    3. Apply dynamic thresholding.
+    4. Apply Morphological Smoothing (Open/Close).
+    5. Filter small noise contours.
     """
     try:
         # 1. Get logits and scores
@@ -67,40 +69,63 @@ def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold):
             # Fallback if no scores
             scores = torch.ones(pred_masks.shape[0], device=pred_masks.device)
 
-        # 2. FILTER FIRST (Crucial for Memory)
-        # Find indices of masks that pass the threshold
+        # 2. FILTER FIRST
+        # Find indices of masks that pass the confidence threshold
         keep_indices = torch.where(scores > confidence_threshold)[0]
         
         if len(keep_indices) == 0:
             return []
             
-        # Keep only good masks (still small resolution)
+        # Keep only good masks
         filtered_masks = pred_masks[keep_indices]
         
         # 3. Resize ONLY the good masks
-        # Add batch/channel dims: [num_good, H, W] -> [1, num_good, H, W] for interpolate
         filtered_masks = filtered_masks.unsqueeze(0)
         
-        # Resize to target size (High VRAM usage here, but now for fewer masks)
+        # Resize to target size
         resized_masks = F.interpolate(
             filtered_masks,
             size=target_size,
-            mode="bilinear",
+            mode="bilinear", # Bilinear is faster, morphology will clean it up
             align_corners=False
-        ).squeeze(0) # Back to [num_good, H, W]
+        ).squeeze(0)
         
-        # 4. Sigmoid and Binarize
+        # 4. Sigmoid and Dynamic Binarization
         probs = torch.sigmoid(resized_masks)
-        binary_masks = (probs > 0.5).float() # Standard threshold for mask
+        binary_masks = (probs > mask_threshold).float() 
         
-        # 5. Convert to Numpy list for drawing
+        # 5. Convert to Numpy for Morphology & Cleaning
         final_masks = []
-        binary_masks_np = binary_masks.cpu().numpy() # Move to CPU only at the end
+        binary_masks_np = binary_masks.cpu().numpy() 
+        
+        # Morphological Kernel (5x5 allows for decent smoothing)
+        kernel = np.ones((5,5), np.uint8)
         
         for mask in binary_masks_np:
-            if mask.sum() < 100: # Filter very small noise
-                continue
-            final_masks.append((mask * 255).astype(np.uint8))
+            # Convert to uint8 for OpenCV
+            mask_uint8 = (mask * 255).astype(np.uint8)
+            
+            # A. Morphological Opening (Remove small noise)
+            mask_cleaned = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel)
+            
+            # B. Morphological Closing (Fill small holes)
+            mask_cleaned = cv2.morphologyEx(mask_cleaned, cv2.MORPH_CLOSE, kernel)
+            
+            # C. Contour Filtering (Remove detached small islands)
+            contours, _ = cv2.findContours(mask_cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Create a new empty mask to draw only valid contours
+            final_clean_mask = np.zeros_like(mask_cleaned)
+            has_valid_object = False
+            
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if area > 200: # Minimum area threshold (adjustable)
+                    cv2.drawContours(final_clean_mask, [cnt], -1, 255, -1)
+                    has_valid_object = True
+            
+            if has_valid_object:
+                final_masks.append(final_clean_mask)
             
         return final_masks
 
@@ -108,7 +133,6 @@ def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold):
         print(f"[ERROR] Optimized post-processing failed: {e}")
         import traceback
         traceback.print_exc()
-        # Clean up memory on error
         torch.cuda.empty_cache()
         return []
 
@@ -176,6 +200,7 @@ async def video_processing_loop(manager, app_state):
         prompt = app_state.get("prompt")
         point_prompt = app_state.get("point_prompt")
         confidence = app_state.get("confidence_threshold", 0.5)
+        mask_thresh = app_state.get("mask_threshold", 0.5)
         display_mode = app_state.get("display_mode", "segmentation")
         
         should_process = (model and processor and (prompt or point_prompt))
@@ -228,7 +253,8 @@ async def video_processing_loop(manager, app_state):
                     final_masks = process_sam3_outputs_optimized(
                         outputs, 
                         target_size=(orig_h, orig_w), 
-                        confidence_threshold=confidence
+                        confidence_threshold=confidence,
+                        mask_threshold=mask_thresh
                     )
                     count = len(final_masks)
                     

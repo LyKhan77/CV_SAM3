@@ -213,7 +213,7 @@
                         <i class="fa-solid fa-cloud-upload-alt text-gray-400 text-4xl mb-3"></i>
                         <p class="text-gray-600 font-medium">Click to upload image</p>
                         <p class="text-gray-400 text-sm">or drag and drop</p>
-                        <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 10MB</p>
+                        <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 1MB</p>
                     </div>
 
                     <!-- Uploaded Image Preview (Hidden by default) -->
@@ -313,6 +313,13 @@
                         <div>
                             <label for="confidence-slider" class="block text-sm font-medium text-gray-600 mb-1">Confidence Threshold: <span id="confidence-value" class="font-bold">50%</span></label>
                             <input type="range" id="confidence-slider" min="0" max="100" value="50" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
+                        </div>
+
+                        <!-- Mask Threshold (New) -->
+                        <div>
+                            <label for="mask-slider" class="block text-sm font-medium text-gray-600 mb-1">Mask Threshold: <span id="mask-value" class="font-bold">50%</span></label>
+                            <input type="range" id="mask-slider" min="0" max="100" value="50" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
+                            <p class="text-[10px] text-gray-400 mt-1">Adjust to tighten/loosen object edges.</p>
                         </div>
 
                         <!-- Display Mode -->

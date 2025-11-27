@@ -100,8 +100,9 @@ function updateSoundSetting() {
 
 function updateModelConfig() {
     const confidence = parseInt(document.getElementById('confidence-slider').value) / 100;
+    const maskThreshold = parseInt(document.getElementById('mask-slider').value) / 100;
     const displayMode = document.getElementById('display-mode-toggle').checked ? "bounding_box" : "segmentation";
-    postData("/api/config/model", { confidence, display_mode: displayMode }).then(data => console.log("Model config response:", data));
+    postData("/api/config/model", { confidence, mask_threshold: maskThreshold, display_mode: displayMode }).then(data => console.log("Model config response:", data));
 }
 
 function handleVideoClick(event) {
@@ -159,6 +160,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('confidence-value').textContent = `${confidenceSlider.value}%`;
     });
     confidenceSlider.addEventListener('change', updateModelConfig);
+
+    const maskSlider = document.getElementById('mask-slider');
+    maskSlider.addEventListener('input', () => {
+        document.getElementById('mask-value').textContent = `${maskSlider.value}%`;
+    });
+    maskSlider.addEventListener('change', updateModelConfig);
     
     const displayModeToggle = document.getElementById('display-mode-toggle');
     displayModeToggle.addEventListener('change', () => {
@@ -308,8 +315,8 @@ function handleFile(file) {
         alert('Please select an image file');
         return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-        alert('File size must be less than 10MB');
+    if (file.size > 1 * 1024 * 1024) {
+        alert('File size must be less than 1MB');
         return;
     }
 
@@ -348,7 +355,7 @@ function resetUploadArea() {
         <i class="fa-solid fa-cloud-upload-alt text-gray-400 text-4xl mb-3"></i>
         <p class="text-gray-600 font-medium">Click to upload image</p>
         <p class="text-gray-400 text-sm">or drag and drop</p>
-        <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 10MB</p>
+        <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 1MB</p>
     `;
     document.getElementById('image-input').addEventListener('change', handleFileSelect);
     document.getElementById('image-upload-area').addEventListener('click', () => {
