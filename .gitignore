@@ -1,4 +1,6 @@
+docs/
 
+*docs/
 
 venv/
 
@@ -7,3 +9,10 @@ venv/
 __pycache__/
 
 *__pycache__/
+
+*.bat
+.bat
+
+test_import.py
+
+uploads/

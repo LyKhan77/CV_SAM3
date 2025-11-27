@@ -163,7 +163,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- 7. Dashboard Update Logic ---
 function updateDashboard(data) {
     const analytics = data.analytics;
-    // ... (rest of the function is the same as before, no changes needed here)
     const countEl = document.getElementById('detected-count');
     const descEl = document.getElementById('object-description');
     const statusBadge = document.getElementById('status-badge');
@@ -171,43 +170,87 @@ function updateDashboard(data) {
     const progressLegend = document.getElementById('progress-legend');
     const videoFeed = document.getElementById('mock-video-feed');
     
+    // Animate count change
     animateValue(countEl, frontendState.currentCount, analytics.count, 500);
     frontendState.currentCount = analytics.count;
 
+    // Update video frame
     if(data.video_frame && data.video_frame.startsWith('data:image')) {
        videoFeed.src = data.video_frame;
+       
+       // Add visual feedback when processing
+       if (analytics.detected_object && analytics.detected_object !== "N/A") {
+           videoFeed.style.border = "2px solid #003473";
+           setTimeout(() => {
+               videoFeed.style.border = "none";
+           }, 500);
+       }
     }
 
+    // Enhanced object description with status
     if (analytics.detected_object && analytics.detected_object !== "N/A") {
-        descEl.innerHTML = `Detecting: <span class="font-bold text-primary">${analytics.detected_object}</span>`;
+        const countText = analytics.count > 0 ? `(${analytics.count} found)` : '(searching...)';
+        descEl.innerHTML = `Detecting: <span class="font-bold text-primary">${analytics.detected_object}</span> <span class="text-sm text-gray-500">${countText}</span>`;
+        
+        // Add processing indicator
+        if (analytics.count === 0) {
+            descEl.innerHTML += '<div class="loader ml-2" style="display: inline-block; width: 16px; height: 16px; border-width: 2px;"></div>';
+        }
     } else if (analytics.detected_object === null) {
         descEl.textContent = "{Object Description}";
     }
     
+    // Update progress bar with smooth animation
     let percentage = (analytics.count / analytics.max_limit) * 100;
     if (percentage > 100) percentage = 100;
+    
+    // Add color coding based on percentage
     progressBar.style.width = `${percentage}%`;
+    if (percentage >= 100) {
+        progressBar.className = "bg-red-600 h-3 rounded-full transition-all duration-500";
+    } else if (percentage >= 80) {
+        progressBar.className = "bg-orange-500 h-3 rounded-full transition-all duration-500";
+    } else {
+        progressBar.className = "bg-primary h-3 rounded-full transition-all duration-500";
+    }
 
     progressLegend.textContent = `${analytics.count}/${analytics.max_limit}`;
     document.getElementById('max-limit').value = analytics.max_limit;
 
+    // Enhanced status badge with animations
     statusBadge.textContent = analytics.status;
     const statusColor = analytics.status_color.toLowerCase();
+    
+    // Remove all status classes first
+    statusBadge.className = "px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-all duration-300";
+    
     if (statusColor === 'success' || statusColor === 'green' || statusColor === 'approved') {
-        statusBadge.className = "px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-green-200 text-green-800 transition-colors duration-300";
+        statusBadge.classList.add('bg-green-200', 'text-green-800');
+        progressBar.classList.remove('bg-red-600', 'bg-orange-500');
         progressBar.classList.add('bg-primary');
-        progressBar.classList.remove('bg-red-600');
     } else if (statusColor === 'orange' || statusColor === 'waiting') {
-        statusBadge.className = "px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-orange-200 text-orange-800 transition-colors duration-300";
+        statusBadge.classList.add('bg-orange-200', 'text-orange-800');
+        progressBar.classList.remove('bg-red-600', 'bg-orange-500');
         progressBar.classList.add('bg-primary');
-        progressBar.classList.remove('bg-red-600');
     } else {
-        statusBadge.className = "px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-red-200 text-red-800 transition-colors duration-300 animate-pulse";
-        progressBar.classList.remove('bg-primary');
+        statusBadge.classList.add('bg-red-200', 'text-red-800', 'animate-pulse');
+        progressBar.classList.remove('bg-primary', 'bg-orange-500');
         progressBar.classList.add('bg-red-600');
     }
 
-    if (analytics.trigger_sound) triggerNotification();
+    // Trigger sound notification if needed
+    if (analytics.trigger_sound) {
+        triggerNotification();
+        
+        // Add visual notification
+        document.body.style.backgroundColor = '#fef2f2';
+        setTimeout(() => {
+            document.body.style.backgroundColor = '#F8F9FA';
+        }, 200);
+    }
+    
+    // Console logging for debugging
+    console.log(`[UI Update] Object: ${analytics.detected_object}, Count: ${analytics.count}, Status: ${analytics.status}`);
 }
 
 function triggerNotification() {
