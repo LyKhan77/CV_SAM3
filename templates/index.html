@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Prototype CV</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .primary-color {
+            color: #003473;
+        }
+        .bg-primary {
+            background-color: #003473;
+        }
+        .border-primary {
+            border-color: #003473;
+        }
+        .ring-primary {
+            --tw-ring-color: #003473;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-50 flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 shadow-sm">
+        <div class="container mx-auto px-6 py-4 relative flex items-center justify-between">
+            <!-- Logo (Left) -->
+            <div class="flex items-center">
+                <img src="/static/images/GSPE_power IT-Photoroom.png" alt="GSPE Logo" class="h-10">
+            </div>
+
+            <!-- Navigation (Center - Absolute) -->
+            <div class="absolute left-1/2 transform -translate-x-1/2 flex items-center gap-4">
+                <a href="#" class="text-[#003473] font-bold text-xl">Dashboard</a>
+                <div class="h-6 w-px bg-gray-300"></div>
+                <a href="#" class="text-gray-500 text-xl">Prototype CV</a>
+            </div>
+
+            <!-- Time/Date (Right) -->
+            <div class="text-right text-sm text-gray-600">
+                <div class="font-semibold">&lt;Time&gt;</div>
+                <div class="text-xs">&lt;Date&gt;</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 container mx-auto px-6 py-8">
+        <div class="grid lg:grid-cols-12 gap-6">
+
+            <!-- Left Column - Main Container -->
+            <div class="lg:col-span-8 space-y-6">
+
+                <!-- Image Upload/Display Area -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h2 class="text-2xl font-bold text-[#003473] mb-4">Main Container</h2>
+
+                    <!-- Upload Area (shown when no image) -->
+                    <div id="uploadArea" class="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center cursor-pointer hover:border-[#003473] transition-colors">
+                        <input type="file" id="imageInput" accept=".jpg,.jpeg,.png" class="hidden">
+                        <div class="flex flex-col items-center justify-center space-y-4">
+                            <svg class="w-20 h-20 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" opacity="0.3"/>
+                            </svg>
+                            <div class="text-gray-500">
+                                <p class="text-lg font-medium">Drop Image File Here</p>
+                                <p class="text-sm">or Click to Browse files</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Image Preview/Result Area (hidden initially) -->
+                    <div id="imagePreview" class="hidden">
+                        <img id="previewImage" src="" alt="Preview" class="w-full h-auto rounded-lg shadow-sm object-contain max-h-[600px]">
+                    </div>
+                </div>
+
+                <!-- Image Section -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="text-xl font-bold text-[#003473] mb-4">Image</h3>
+
+                    <!-- Image card (hidden initially) -->
+                    <div id="imageCard" class="hidden border-2 border-dashed border-gray-300 rounded-lg p-3 flex items-center gap-3">
+                        <!-- Thumbnail -->
+                        <div class="w-16 h-16 flex-shrink-0 rounded overflow-hidden bg-gray-100">
+                            <img id="imageThumbnail" src="" alt="thumbnail" class="w-full h-full object-cover">
+                        </div>
+
+                        <!-- Filename -->
+                        <span id="imageFileName" class="flex-1 text-gray-700 truncate">{file_name}</span>
+
+                        <!-- Remove button -->
+                        <button id="removeImageBtn" class="w-8 h-8 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white rounded transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Prompt Section -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <h2 class="text-2xl font-bold text-[#003473]">Prompt</h2>
+                        <button id="howToPromptBtn" class="px-3 py-1 bg-gray-700 hover:bg-gray-800 text-white text-sm rounded-md transition">
+                            How To Prompt
+                        </button>
+                    </div>
+                    <div class="flex gap-3">
+                        <input
+                            type="text"
+                            id="promptInput"
+                            placeholder="{Object Name}"
+                            class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003473] focus:border-transparent"
+                        >
+                        <button
+                            id="runButton"
+                            class="bg-[#003473] hover:bg-blue-900 text-white font-bold px-8 py-3 rounded-lg transition duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z"/>
+                            </svg>
+                            Run
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Right Column - Description & Summary -->
+            <div class="lg:col-span-4 space-y-6">
+
+                <!-- Description Card -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="text-xl font-bold text-[#003473] mb-4">Description</h3>
+                    <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <p class="text-gray-600 text-center font-medium">{Object Description}</p>
+                    </div>
+                </div>
+
+                <!-- Summary Card -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="text-xl font-bold text-[#003473] mb-4">Summary</h3>
+
+                    <!-- Maximum Limit -->
+                    <div class="mb-4">
+                        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                            </svg>
+                            Maximum limit :
+                        </label>
+                        <input
+                            type="number"
+                            id="maxLimitInput"
+                            min="0"
+                            value="0"
+                            class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003473] focus:border-transparent"
+                        >
+                    </div>
+
+                    <!-- Status -->
+                    <div class="mb-4">
+                        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                            </svg>
+                            Status :
+                        </label>
+                        <div id="statusCard" class="p-3 rounded-lg text-center font-bold bg-green-50 border-2 border-green-200 text-green-700">
+                            Approved
+                        </div>
+                    </div>
+
+                    <!-- Total Detected -->
+                    <div>
+                        <h4 class="text-center text-lg font-bold text-gray-700 mb-3">Total Detected</h4>
+                        <div class="text-center mb-3">
+                            <span id="countDisplay" class="text-5xl font-bold text-[#003473]">{Count}</span>
+                        </div>
+                        <div class="w-full h-4 bg-gray-200 rounded-full overflow-hidden">
+                            <div id="progressBar" class="h-full bg-[#003473] transition-all duration-500" style="width: 0%"></div>
+                        </div>
+                        <div id="progressLabel" class="text-center text-sm text-gray-600 mt-2">
+                            (count)/(Max_Limit)
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </main>
+
+    <!-- How To Prompt Modal -->
+    <div id="promptModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <!-- Modal Header -->
+            <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-xl">
+                <h3 class="text-xl font-bold text-[#003473]">How To Prompt SAM</h3>
+                <button id="closeModalBtn" class="text-gray-400 hover:text-gray-600 transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Modal Content -->
+            <div class="px-6 py-6 space-y-4">
+                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                    <p class="font-semibold text-blue-900">Quick Tips for Better Results</p>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="flex gap-3">
+                        <span class="text-[#003473] font-bold flex-shrink-0">1.</span>
+                        <div>
+                            <strong>Be Specific:</strong> Use clear object names with descriptors
+                            <div class="text-sm text-gray-600 mt-1">Example: "red safety helmet" instead of "thing"</div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <span class="text-[#003473] font-bold flex-shrink-0">2.</span>
+                        <div>
+                            <strong>Add Context:</strong> Mention position and surroundings
+                            <div class="text-sm text-gray-600 mt-1">Example: "worker on the left side"</div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <span class="text-[#003473] font-bold flex-shrink-0">3.</span>
+                        <div>
+                            <strong>Use Descriptors:</strong> Include color, size, or material
+                            <div class="text-sm text-gray-600 mt-1">Example: "orange safety vest" or "metal ladder"</div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <span class="text-[#003473] font-bold flex-shrink-0">4.</span>
+                        <div>
+                            <strong>One Object Per Prompt:</strong> Detect one type at a time
+                            <div class="text-sm text-gray-600 mt-1">❌ Bad: "helmets and vests" | ✓ Good: "helmet"</div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <span class="text-[#003473] font-bold flex-shrink-0">5.</span>
+                        <div>
+                            <strong>Clear Edges Work Best:</strong> Objects with defined boundaries
+                            <div class="text-sm text-gray-600 mt-1">✓ Best: Tools, equipment, people, vehicles</div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <span class="text-[#003473] font-bold flex-shrink-0">6.</span>
+                        <div>
+                            <strong>Add Spatial Hints:</strong> For multiple similar objects
+                            <div class="text-sm text-gray-600 mt-1">Example: "person in the center" or "box on top"</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 rounded-lg p-4 mt-6">
+                    <p class="font-semibold text-gray-900 mb-2">Examples:</p>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex gap-2">
+                            <span class="text-red-600 flex-shrink-0">❌</span>
+                            <span class="text-gray-600">Bad: "thing" or "stuff"</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <span class="text-green-600 flex-shrink-0">✓</span>
+                            <span class="text-gray-600">Good: "safety helmet"</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <span class="text-green-600 flex-shrink-0">✓✓</span>
+                            <span class="text-gray-600">Better: "yellow safety helmet on worker"</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
