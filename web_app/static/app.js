@@ -200,9 +200,13 @@ function updateDashboard(data) {
     if(data.video_frame && data.video_frame.startsWith('data:image')) {
        videoFeed.src = data.video_frame;
        
+       // Use class toggling instead of inline styles/setTimeout to prevent layout thrashing
        if (analytics.detected_object && analytics.detected_object !== "N/A") {
-           videoFeed.style.border = "2px solid #003473";
-           setTimeout(() => { videoFeed.style.border = "none"; }, 500);
+           videoFeed.classList.remove('border-transparent');
+           videoFeed.classList.add('border-primary');
+       } else {
+           videoFeed.classList.remove('border-primary');
+           videoFeed.classList.add('border-transparent');
        }
     }
 
