@@ -7,6 +7,30 @@ let segmentedObjects = [];
 let currentObjectId = 0;
 let isSegmenting = false;
 
+// Toast notification system
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg text-white z-50 transition-opacity duration-300`;
+
+    const colors = {
+        'info': 'bg-blue-500',
+        'warning': 'bg-orange-500',
+        'error': 'bg-red-500',
+        'success': 'bg-green-500'
+    };
+
+    toast.classList.add(colors[type] || colors.info);
+    toast.textContent = message;
+
+    document.body.appendChild(toast);
+
+    // Fade out and remove after 3 seconds
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
 // DOM elements
 const uploadArea = document.getElementById('uploadArea');
 const imageInput = document.getElementById('imageInput');
@@ -42,11 +66,27 @@ let detectionMode = 'text'; // 'text' or 'click'
 let clickedPoints = [];
 let clickMarkers = [];
 
+// Load model information from backend
+async function loadModelInfo() {
+    try {
+        const response = await fetch('/model/info');
+        const result = await response.json();
+
+        if (result.success) {
+            const modelNameEl = document.getElementById('modelName');
+            modelNameEl.textContent = result.model_name;
+        }
+    } catch (error) {
+        console.error('Failed to load model info:', error);
+    }
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     updateDateTime();
     setInterval(updateDateTime, 1000);
+    loadModelInfo();
 });
 
 function setupEventListeners() {
@@ -333,7 +373,7 @@ function updateProgressBar(count) {
 }
 
 function updateStatusDisplay() {
-    const detectedCount = parseInt(countDisplay.textContent.replace('{Count}', '0')) || 0;
+    const detectedCount = parseInt(countDisplay.textContent) || 0;
     const maxLimit = parseInt(maxLimitInput.value) || 0;
 
     if (detectedCount >= maxLimit && maxLimit > 0) {
@@ -346,10 +386,8 @@ function updateStatusDisplay() {
         statusCard.textContent = 'Waiting';
     }
 
-    // Update progress bar if count exists
-    if (!countDisplay.textContent.includes('{Count}')) {
-        updateProgressBar(detectedCount);
-    }
+    // Update progress bar
+    updateProgressBar(detectedCount);
 }
 
 function updateDateTime() {
@@ -467,6 +505,7 @@ async function performInstantSegmentation(point, displayX, displayY) {
         formData.append('file', currentImageFile);
         formData.append('x', point.x);
         formData.append('y', point.y);
+        formData.append('confidence', confidenceSlider.value);
 
         const response = await fetch('/analyze/instant', {
             method: 'POST',
@@ -481,6 +520,18 @@ async function performInstantSegmentation(point, displayX, displayY) {
 
         if (result.success) {
             const data = result.data;
+
+            // Filter by confidence threshold
+            const confidenceThreshold = parseFloat(confidenceSlider.value);
+            if (data.confidence < confidenceThreshold) {
+                const confidencePercent = (data.confidence * 100).toFixed(1);
+                const thresholdPercent = (confidenceThreshold * 100).toFixed(1);
+                const message = `Object rejected: ${data.object_label} (${confidencePercent}%) below threshold (${thresholdPercent}%)`;
+
+                showToast(message, 'warning');
+                console.log(message);
+                return;  // Exit early - don't add to segmentedObjects
+            }
 
             // Check for IoU overlap with existing objects
             const overlappingObject = findOverlappingObject(data.bbox);
@@ -563,19 +614,15 @@ function calculateIoU(bbox1, bbox2) {
 }
 
 function renderSegmentOverlay(objectId, data) {
-    // Create canvas overlay for this segment
+    // Create canvas overlay
     const container = previewImage.parentElement;
 
-    // Ensure container is positioned
     if (!container.style.position || container.style.position === 'static') {
         container.style.position = 'relative';
     }
 
-    // Check if canvas already exists
     let canvas = container.querySelector('canvas.segment-overlay');
-
     if (!canvas) {
-        // Create canvas matching image size
         canvas = document.createElement('canvas');
         canvas.className = 'segment-overlay absolute top-0 left-0 pointer-events-none';
         canvas.style.zIndex = '10';
@@ -590,41 +637,59 @@ function renderSegmentOverlay(objectId, data) {
     }
 
     const ctx = canvas.getContext('2d');
-
-    // Decode mask from base64
-    const maskBytes = Uint8Array.from(atob(data.mask), c => c.charCodeAt(0));
-    const [maskHeight, maskWidth] = data.mask_shape;
-
-    // Scale bbox to canvas coordinates
     const rect = previewImage.getBoundingClientRect();
     const scaleX = rect.width / previewImage.naturalWidth;
     const scaleY = rect.height / previewImage.naturalHeight;
-
-    const [x1, y1, x2, y2] = data.bbox;
-    const canvasX1 = x1 * scaleX;
-    const canvasY1 = y1 * scaleY;
-    const canvasX2 = x2 * scaleX;
-    const canvasY2 = y2 * scaleY;
-
-    // Draw semi-transparent overlay
     const color = getSegmentColor(objectId);
-    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, 0.3)`;
-    ctx.fillRect(canvasX1, canvasY1, canvasX2 - canvasX1, canvasY2 - canvasY1);
 
-    // Draw bounding box
-    ctx.strokeStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(canvasX1, canvasY1, canvasX2 - canvasX1, canvasY2 - canvasY1);
+    // Draw filled mask with contour outline
+    if (data.contour && data.contour.length > 0) {
+        ctx.beginPath();
 
-    // Draw label
+        const firstPoint = data.contour[0];
+        ctx.moveTo(firstPoint[0] * scaleX, firstPoint[1] * scaleY);
+
+        for (let i = 1; i < data.contour.length; i++) {
+            const point = data.contour[i];
+            ctx.lineTo(point[0] * scaleX, point[1] * scaleY);
+        }
+
+        ctx.closePath();
+
+        // Fill with semi-transparent color
+        ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, 0.3)`;
+        ctx.fill();
+
+        // Draw contour outline
+        ctx.strokeStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    } else {
+        // Fallback: Draw bounding box if contour not available
+        const [x1, y1, x2, y2] = data.bbox;
+        const canvasX1 = x1 * scaleX;
+        const canvasY1 = y1 * scaleY;
+        const canvasX2 = x2 * scaleX;
+        const canvasY2 = y2 * scaleY;
+
+        ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, 0.3)`;
+        ctx.fillRect(canvasX1, canvasY1, canvasX2 - canvasX1, canvasY2 - canvasY1);
+
+        ctx.strokeStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(canvasX1, canvasY1, canvasX2 - canvasX1, canvasY2 - canvasY1);
+    }
+
+    // Draw label at bbox center
+    const [x1, y1, x2, y2] = data.bbox;
+    const centerX = ((x1 + x2) / 2) * scaleX;
+    const centerY = ((y1 + y2) / 2) * scaleY;
+
     const label = `${data.object_label} (${(data.confidence * 100).toFixed(0)}%)`;
     ctx.font = 'bold 14px Arial';
     ctx.fillStyle = 'white';
     ctx.strokeStyle = 'black';
     ctx.lineWidth = 3;
-
-    const centerX = (canvasX1 + canvasX2) / 2;
-    const centerY = (canvasY1 + canvasY2) / 2;
 
     ctx.strokeText(label, centerX - ctx.measureText(label).width / 2, centerY);
     ctx.fillText(label, centerX - ctx.measureText(label).width / 2, centerY);
@@ -684,7 +749,7 @@ function clearAllSegments() {
     currentObjectId = 0;
 
     // Reset count and description
-    countDisplay.textContent = '{Count}';
+    countDisplay.textContent = '0';
     updateProgressBar(0);
     updateStatusDisplay();
     updateDescription();  // Reset description to placeholder

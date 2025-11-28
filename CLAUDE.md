@@ -6,6 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AI Vision Monitor Dashboard - A Flask-based web application for object detection and counting using Meta's Segment Anything Model (SAM). Built for GSPE (Grahasumber Prima Elektronik) to monitor compliance by counting objects in uploaded images against configurable thresholds.
 
+## Claude Code Storage System
+
+**IMPORTANT:** This repository uses specific folders for Claude Code data storage:
+
+### Storage Locations
+- **Plans:** `.claude/plans/` - Implementation plans created during plan mode
+- **History:** `.claude/history/` - Conversation history and session data
+
+### Notes
+- These folders should be added to `.gitignore` to avoid committing Claude Code internal data
+- Plans are created when using plan mode to organize complex implementation tasks
+- History preserves context across sessions for continuity
+
 ## Development Commands
 
 ### Environment Setup

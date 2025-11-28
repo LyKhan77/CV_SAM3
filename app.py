@@ -146,6 +146,26 @@ def analyze():
             'error': f'Server error: {str(e)}'
         }), 500
 
+@app.route('/model/info', methods=['GET'])
+def get_model_info():
+    """
+    Return current model information for UI display
+    """
+    try:
+        model_name = sam_model.get_model_display_name() if sam_model else 'Demo Mode'
+        model_available = sam_model.sam_available if sam_model else False
+
+        return jsonify({
+            'success': True,
+            'model_name': model_name,
+            'model_available': model_available
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/analyze/instant', methods=['POST'])
 def analyze_instant():
     """
@@ -202,11 +222,18 @@ def analyze_instant():
         # Process with SAM 2 + CLIP
         if sam_model is None:
             # Demo mode
+            demo_bbox = [int(point_x)-50, int(point_y)-50, int(point_x)+50, int(point_y)+50]
             result = {
                 'mask': np.zeros((100, 100), dtype=bool),
                 'object_label': 'demo_object',
                 'confidence': 0.85,
-                'bbox': [int(point_x)-50, int(point_y)-50, int(point_x)+50, int(point_y)+50],
+                'bbox': demo_bbox,
+                'contour': [  # Add demo contour (rectangle)
+                    [demo_bbox[0], demo_bbox[1]],  # Top-left
+                    [demo_bbox[2], demo_bbox[1]],  # Top-right
+                    [demo_bbox[2], demo_bbox[3]],  # Bottom-right
+                    [demo_bbox[0], demo_bbox[3]]   # Bottom-left
+                ],
                 'top_3': [
                     {'label': 'demo_object', 'confidence': 0.85},
                     {'label': 'unknown', 'confidence': 0.10},
@@ -222,6 +249,21 @@ def analyze_instant():
         mask_bytes = mask_uint8.tobytes()
         mask_base64 = base64.b64encode(mask_bytes).decode('utf-8')
 
+        # Extract contour points for frontend rendering
+        import cv2
+        contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(contours) > 0:
+            # Get largest contour (should be the main object)
+            main_contour = max(contours, key=cv2.contourArea)
+            # Convert to list of [x, y] points
+            contour_points = main_contour.reshape(-1, 2).tolist()
+        else:
+            contour_points = []
+
+        # Store contour in result if not from demo mode
+        if 'contour' not in result:
+            result['contour'] = contour_points
+
         # Clean up temporary file
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -235,6 +277,7 @@ def analyze_instant():
                 'object_label': result['object_label'],
                 'confidence': float(result['confidence']),
                 'bbox': result['bbox'],
+                'contour': result['contour'],
                 'top_3': result['top_3']
             }
         }), 200

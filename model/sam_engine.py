@@ -19,6 +19,7 @@ class SamPredictorWrapper:
             model_type: Type of SAM 2 model ('hiera_tiny', 'hiera_small', 'hiera_base_plus', 'hiera_large')
             checkpoint_path: Path to model checkpoint file
         """
+        self.model_type = model_type  # Store model type for display
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
 
@@ -113,6 +114,21 @@ class SamPredictorWrapper:
             'hiera_large': 'sam2.1_hiera_l.yaml'
         }
         return config_files.get(model_type, 'sam2.1_hiera_b+.yaml')
+
+    def get_model_display_name(self):
+        """
+        Get human-readable model name for UI display
+
+        Returns:
+            str: Formatted model name for display
+        """
+        model_names = {
+            'hiera_tiny': 'SAM 2.1 Hiera Tiny',
+            'hiera_small': 'SAM 2.1 Hiera Small',
+            'hiera_base_plus': 'SAM 2.1 Hiera Base+',
+            'hiera_large': 'SAM 2.1 Hiera Large'
+        }
+        return model_names.get(self.model_type, 'SAM 2.1')
 
     def predict_single_point_instant(self, image_path, point):
         """
