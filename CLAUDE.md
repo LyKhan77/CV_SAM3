@@ -4,82 +4,110 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI-powered computer vision monitoring dashboard that performs real-time object segmentation and detection using Meta's SAM-3 (Segment Anything Model) on RTSP video streams. The application consists of a FastAPI backend with WebSocket support and a responsive HTML/JavaScript frontend.
+This is an AI Computer Vision Monitoring Dashboard that uses Meta's SAM 3 (Segment Anything Model) to detect and segment objects in real-time video streams or static images. The system provides a web-based interface for configuring prompts, setting detection limits, and monitoring analytics.
 
 ## Architecture
 
-### Backend Structure
-- **main.py**: FastAPI application with API endpoints, WebSocket handling, and application state management
-- **model.py**: SAM-3 model loading, video processing pipeline, and AI inference logic
-- **Centralized State**: All configuration stored in `app_state` dictionary (RTSP URL, prompts, limits, model settings)
-
-### Frontend Structure
-- **web_app/templates/index.html**: Responsive dashboard using Tailwind CSS and Inter font
-- **web_app/static/app.js**: Client-side WebSocket communication, UI updates, and user interactions
-
 ### Core Components
-1. **Video Processing Loop**: Background async task in `model.py:32` that processes RTSP frames every 10 frames
-2. **Real-time Communication**: WebSocket endpoint `/ws/monitor` for streaming video frames and analytics
-3. **Object Detection**: Text-based prompts or point-and-click selection for SAM-3 segmentation
-4. **Configuration System**: API endpoints for stream URL, prompts, limits, sound, and model settings
 
-## Development Commands
+- **main.py**: FastAPI backend server that handles:
+  - WebSocket connections for real-time video streaming
+  - REST API endpoints for configuration management
+  - File upload handling for static image processing
+  - State management for RTSP streams, prompts, and model configuration
+
+- **model.py**: Computer vision processing module containing:
+  - SAM 3 model loading and inference logic
+  - Video processing loop with RTSP stream handling
+  - Optimized post-processing for mask generation and filtering
+  - Support for both text prompts and point-based selection
+
+- **web_app/**: Frontend web application
+  - **templates/index.html**: Main dashboard UI using Tailwind CSS
+  - **static/app.js**: Client-side JavaScript for WebSocket communication, UI updates, and file upload handling
+
+### Data Flow
+
+1. **Input Sources**:
+   - RTSP video streams (IP cameras)
+   - Static image uploads
+
+2. **Processing Pipeline**:
+   - Frame capture and resizing (max 1024px for efficiency)
+   - SAM 3 inference with text or point prompts
+   - Mask optimization with morphological operations
+   - Object counting and visualization
+
+3. **Output**:
+   - Real-time video feed with segmentation overlays
+   - Analytics data (object count, status, limits)
+   - WebSocket broadcast to connected clients
+
+## Common Commands
+
+### Development Setup
 
 ```bash
-# Setup virtual environment (recommended)
+# Create and activate virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Linux/Mac
+# or
+venv\Scripts\activate  # Windows
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Run development server
+# Test imports (run before starting)
+python test_imports.py
+
+# Start the development server
 python main.py
-# Server runs on http://127.0.0.1:8000
 ```
 
-## Key Technical Details
+### Testing and Debugging
 
-### Model Configuration
-- Uses `facebook/sam3` from HuggingFace transformers
-- CUDA GPU support automatically detected and preferred
-- Model loading happens on application startup in `main.py:52`
+```bash
+# Test model imports and CUDA availability
+python test_imports.py
 
-### Video Processing Pipeline
-- RTSP streams processed using OpenCV with FFMPEG backend
-- Frames processed every 10 iterations for performance (`PROCESS_EVERY_N_FRAMES = 10`)
-- Base64 encoding for WebSocket video frame transmission
-- SAM-3 inference with separate image and text input processing
+# Hugging Face login (if needed for model access)
+python login_helper.py
 
-### WebSocket Communication
-- Real-time updates include video frames and analytics data
-- Point-and-click object selection sends normalized coordinates via WebSocket
-- Bidirectional communication for configuration updates
+# Run with debug batch file (Windows)
+run_server_debug.bat
+```
 
-### State Management Patterns
-- All settings stored in `app_state` dictionary in `main.py:23`
-- Frontend maintains `frontendState` object for UI state in `app.js:15`
-- Configuration changes propagate through API calls to backend state
+### Key Configuration
 
-## Critical Files for Modifications
+- **Server**: Runs on `http://127.0.0.1:8000` by default
+- **WebSocket**: Connect to `ws://127.0.0.1:8000/ws/monitor`
+- **Upload Directory**: `uploads/` (created automatically)
+- **Max Input Size**: 1024px (for SAM 3 performance)
+- **Frame Processing**: Every 5th frame for RTSP streams (for performance)
 
-- **main.py:51-58**: Application lifespan and model initialization
-- **model.py:71-100**: AI inference logic and mask processing
-- **model.py:102-119**: Frame encoding and WebSocket broadcasting
-- **app.js:90-120**: Point-and-click coordinate handling
-- **app.js:164-211**: Dashboard update logic for real-time UI
+## Model Configuration
 
-## Development Notes
+The system supports dynamic model configuration through API endpoints:
 
-- No formal testing framework - use manual testing via web interface
-- Async/await patterns used throughout for performance
-- Frontend assets served directly by FastAPI static file mounting
-- Point coordinates normalized (0-1) for cross-resolution compatibility
-- Error handling present but could be enhanced for production use
+- **Confidence Threshold**: Filter masks by confidence score (0.0-1.0)
+- **Mask Threshold**: Binary threshold for mask generation (0.0-1.0)
+- **Display Mode**: "segmentation" (contours) or "bounding_box" (rectangles)
 
-## Common Issues and Solutions
+## Important Notes
 
-- **Model Loading**: First startup may be slow due to SAM-3 model download
-- **CUDA Memory**: Monitor GPU memory usage with high-resolution streams
-- **RTSP Connectivity**: Ensure network access to camera streams and proper URL format
-- **WebSocket Disconnections**: Frontend handles reconnection attempts automatically
+- CUDA support automatically detected and utilized when available
+- RTSP streams require proper camera authentication and network access
+- Uploaded images are automatically resized to max 1024px for optimal performance
+- The system includes aggressive memory management and cache clearing for stable operation
+- Morphological operations (opening/closing) are applied to clean up noisy masks
+
+## API Endpoints
+
+- `POST /api/config/stream` - Set RTSP URL
+- `POST /api/config/prompt` - Set text prompt for object detection
+- `POST /api/config/limit` - Set detection limit
+- `POST /api/config/sound` - Toggle notification sound
+- `POST /api/config/model` - Update model configuration
+- `POST /api/upload/image` - Upload static image for processing
+- `POST /api/config/clear-image` - Clear uploaded image
+- `WebSocket /ws/monitor` - Real-time video and analytics stream
