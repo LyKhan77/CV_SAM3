@@ -22,7 +22,6 @@ class SoundRequest(BaseModel): enabled: bool
 class ModelConfigRequest(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     mask_threshold: float = Field(0.5, ge=0.0, le=1.0)
-    display_mode: str
 
 class InputModeRequest(BaseModel):
     mode: str  # "rtsp", "video", or "image"
@@ -46,7 +45,6 @@ app_state: Dict[str, Any] = {
     # New state for model configuration
     "confidence_threshold": 0.5,
     "mask_threshold": 0.5,
-    "display_mode": "segmentation", # "segmentation" or "bounding_box"
     "select_object_mode": False,
     # New state for input mode management
     "input_mode": "rtsp",              # "rtsp", "video", or "image"
@@ -125,8 +123,7 @@ async def set_sound_toggle(request: SoundRequest):
 async def set_model_config(request: ModelConfigRequest):
     app_state["confidence_threshold"] = request.confidence
     app_state["mask_threshold"] = request.mask_threshold
-    app_state["display_mode"] = request.display_mode
-    print(f"Model config updated: Confidence={request.confidence}, Mask={request.mask_threshold}, Display={request.display_mode}")
+    print(f"Model config updated: Confidence={request.confidence}, Mask={request.mask_threshold}")
     return {"status": "success", "message": "Model config updated"}
 
 @app.post("/api/config/input-mode")

@@ -8,9 +8,9 @@ from PIL import Image
 from transformers import Sam3Processor, Sam3Model
 import torch.nn.functional as F
 
-def draw_masks(frame, masks, display_mode):
+def draw_masks(frame, masks):
     """
-    Draw masks on frame based on display mode.
+    Draw masks on frame (Always in Segmentation Mode).
     Expects masks as a list of binary numpy arrays (uint8) sized to original frame.
     """
     if not masks:
@@ -30,46 +30,35 @@ def draw_masks(frame, masks, display_mode):
             if mask.shape[:2] != frame.shape[:2]:
                 mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
                 
-            if display_mode == "bounding_box":
-                x, y, w, h = cv2.boundingRect(mask)
-                if w > 0 and h > 0:
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-                    # Draw ID background for readability
-                    label = f"#{i+1}"
-                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                    cv2.rectangle(frame, (x, y - 20), (x + tw + 4, y), color, -1)
-                    cv2.putText(frame, label, (x + 2, y - 5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-            else:
-                # Segmentation mode
-                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if contours:
-                    # SMOOTHING: Approximation
-                    smoothed_contours = []
-                    for cnt in contours:
-                        epsilon = 0.005 * cv2.arcLength(cnt, True) # 0.5% error margin
-                        approx = cv2.approxPolyDP(cnt, epsilon, True)
-                        smoothed_contours.append(approx)
+            # Segmentation mode
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                # SMOOTHING: Approximation
+                smoothed_contours = []
+                for cnt in contours:
+                    epsilon = 0.005 * cv2.arcLength(cnt, True) # 0.5% error margin
+                    approx = cv2.approxPolyDP(cnt, epsilon, True)
+                    smoothed_contours.append(approx)
 
-                    cv2.drawContours(frame, smoothed_contours, -1, color, 2) # Draw smooth lines
-                    
-                    # Overlay fill
-                    overlay = frame.copy()
-                    cv2.drawContours(overlay, smoothed_contours, -1, color, -1)
-                    cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
-                    
-                    # Calculate center for ID
-                    if len(smoothed_contours) > 0:
-                        M = cv2.moments(smoothed_contours[0])
-                        if M["m00"] != 0:
-                            cX = int(M["m10"] / M["m00"])
-                            cY = int(M["m01"] / M["m00"])
-                            # Draw ID
-                            label = f"#{i+1}"
-                            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                            cv2.rectangle(frame, (cX - tw//2 - 2, cY - th//2 - 2), (cX + tw//2 + 2, cY + th//2 + 2), (0,255,0), -1) # Green bg
-                            cv2.putText(frame, label, (cX - tw//2, cY + th//2), 
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+                cv2.drawContours(frame, smoothed_contours, -1, color, 2) # Draw smooth lines
+                
+                # Overlay fill
+                overlay = frame.copy()
+                cv2.drawContours(overlay, smoothed_contours, -1, color, -1)
+                cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
+                
+                # Calculate center for ID
+                if len(smoothed_contours) > 0:
+                    M = cv2.moments(smoothed_contours[0])
+                    if M["m00"] != 0:
+                        cX = int(M["m10"] / M["m00"])
+                        cY = int(M["m01"] / M["m00"])
+                        # Draw ID
+                        label = f"#{i+1}"
+                        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                        cv2.rectangle(frame, (cX - tw//2 - 2, cY - th//2 - 2), (cX + tw//2 + 2, cY + th//2 + 2), (0,255,0), -1) # Green bg
+                        cv2.putText(frame, label, (cX - tw//2, cY + th//2), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
                     
         except Exception as e:
             print(f"[ERROR] Draw mask failed: {e}")
@@ -271,7 +260,6 @@ async def video_processing_loop(manager, app_state):
         point_prompt = app_state.get("point_prompt")
         confidence = app_state.get("confidence_threshold", 0.5)
         mask_thresh = app_state.get("mask_threshold", 0.5)
-        display_mode = app_state.get("display_mode", "segmentation")
         sound_enabled = app_state.get("sound_enabled")
         max_limit = app_state.get("max_limit")
 
@@ -298,7 +286,6 @@ async def video_processing_loop(manager, app_state):
             json.dumps(point_prompt) if point_prompt else None,
             confidence,
             mask_thresh,
-            display_mode,
             sound_enabled,
             max_limit
         )
@@ -474,7 +461,7 @@ async def video_processing_loop(manager, app_state):
                     count = len(final_masks)
                     
                     # Draw on ORIGINAL frame
-                    draw_masks(frame, final_masks, display_mode)
+                    draw_masks(frame, final_masks)
                     
             except Exception as e:
                 print(f"[ERROR] Inference failed: {e}")

@@ -121,8 +121,7 @@ function updateSoundSetting() {
 function updateModelConfig() {
     const confidence = parseInt(document.getElementById('confidence-slider').value) / 100;
     const maskThreshold = parseInt(document.getElementById('mask-slider').value) / 100;
-    const displayMode = document.getElementById('display-mode-toggle').checked ? "bounding_box" : "segmentation";
-    postData("/api/config/model", { confidence, mask_threshold: maskThreshold, display_mode: displayMode }).then(data => console.log("Model config response:", data));
+    postData("/api/config/model", { confidence, mask_threshold: maskThreshold }).then(data => console.log("Model config response:", data));
 }
 
 function handleVideoClick(event) {
@@ -187,12 +186,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     maskSlider.addEventListener('change', updateModelConfig);
     
-    const displayModeToggle = document.getElementById('display-mode-toggle');
-    displayModeToggle.addEventListener('change', () => {
-        document.getElementById('display-mode-label').textContent = displayModeToggle.checked ? "Bounding Box" : "Segmentation";
-        updateModelConfig();
-    });
-
     document.getElementById('select-object-toggle').addEventListener('change', toggleClickSelectMode);
     document.getElementById('mock-video-feed').addEventListener('click', handleVideoClick);
 
@@ -314,7 +307,12 @@ function updateDashboard(data) {
     }
 
     progressLegend.textContent = `${analytics.count}/${analytics.max_limit}`;
-    document.getElementById('max-limit').value = analytics.max_limit;
+    
+    // Only update the input field if the user is NOT currently typing in it
+    const maxLimitInput = document.getElementById('max-limit');
+    if (maxLimitInput && document.activeElement !== maxLimitInput) {
+        maxLimitInput.value = analytics.max_limit;
+    }
 
     statusBadge.textContent = analytics.status;
     const statusColor = analytics.status_color.toLowerCase();
