@@ -133,6 +133,95 @@
             position: relative;
             overflow: visible;
         }
+
+        /* Input panel styles */
+        .input-panel {
+            transition: all 0.3s ease;
+        }
+
+        .input-panel.hidden {
+            display: none;
+        }
+
+        /* Modern Radio Button Styles */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+
+        /* Radio button container */
+        .group {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 1rem; /* Add spacing between radio buttons */
+        }
+
+        /* Radio button background */
+        .group .w-6 {
+            width: 1.5rem;
+            height: 1.5rem;
+            border: 2px solid #d1d5db;
+            border-radius: 0.375rem;
+            background-color: white;
+            cursor: pointer;
+            transition: all 200ms;
+            position: relative;
+        }
+
+        /* Radio button checked state */
+        .peer:checked ~ .w-6 {
+            border-color: #003473;
+            background-color: #003473;
+        }
+
+        /* Radio button white circle inside */
+        .group .absolute {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 0.75rem;
+            height: 0.75rem;
+            border-radius: 50%;
+            background-color: white;
+            transition: all 200ms;
+        }
+
+        /* Radio button checked - move white circle to right */
+        .peer:checked ~ .w-6 .absolute {
+            transform: translate(150%, -50%);
+        }
+
+        /* Label text styling */
+        .group-hover\:text-gray-900:hover {
+            color: #111827;
+        }
+
+        .peer-checked\:text-primary:checked ~ span {
+            color: #003473;
+            font-weight: 500;
+        }
+
+        /* Video controls styling */
+        .video-controls {
+            background-color: #f3f4f6;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .video-seek-slider {
+            width: 100%;
+            height: 4px;
+        }
     </style>
 </head>
 <body class="text-gray-700 h-screen flex flex-col overflow-hidden">
@@ -168,62 +257,159 @@
     <main class="flex-1 overflow-y-auto p-4 lg:p-6">
         <div class="max-w-[1920px] mx-auto dashboard-grid h-full" style="min-height: calc(100vh - 8rem);">
 
-            <!-- LEFT COLUMN (Stream, Input Image, Prompt) -->
+            <!-- LEFT COLUMN (Main Container, Input Image, Prompt) -->
             <div class="left-column flex flex-col gap-6" style="min-height: calc(100vh - 8rem);">
                 <!-- Main content container -->
                 <div class="flex flex-col gap-6 h-full">
-                
-                <!-- Streaming Panel -->
-                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col gap-4 flex-1">
-                    <h3 class="text-xl font-bold text-primary">Streaming Panel</h3>
-                    
-                    <!-- Video Container -->
-                    <div class="relative bg-gray-100 rounded-lg border border-gray-200 flex-1 min-h-[400px] flex items-center justify-center overflow-hidden group">
-                        <div id="stream-placeholder" class="text-center">
-                            <i class="fa-regular fa-circle-play text-gray-400 text-6xl mb-4 group-hover:text-primary transition-colors"></i>
-                            <p class="text-gray-400 font-medium">&lt;Camera RTSP Live Stream&gt;</p>
-                        </div>
-                        <!-- Simulated Live Overlay (Hidden by default) -->
-                        <div id="live-indicator" class="hidden absolute top-4 left-4 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse">
-                            LIVE
-                        </div>
-                        <img id="mock-video-feed" src="" alt="Stream" class="hidden w-full h-full object-cover border-2 border-transparent transition-colors duration-200">
-                    </div>
 
-                    <!-- Input RTSP -->
-                    <div class="mt-auto">
-                        <label class="block text-sm font-medium text-gray-600 mb-2">Input RTSP URL</label>
-                        <div class="flex gap-3">
-                            <input type="text" id="rtsp-input" placeholder="rtsp://192.168.1.1:554/stream" 
-                                class="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm">
-                            <button onclick="activateStream()" class="bg-primary hover:bg-blue-800 text-white font-bold px-8 py-2 rounded-lg text-sm transition-colors shadow-md">
-                                ENTER
-                            </button>
-                        </div>
+                <!-- Input Mode Selection (Pill Style - No Panel) -->
+                <div class="flex flex-col gap-3">
+                    <div class="bg-gray-200 rounded-full p-1 flex items-center justify-between relative mb-2 shadow-md">
+                        <!-- RTSP Option -->
+                        <label class="flex-1 text-center cursor-pointer z-10">
+                            <input type="radio" name="input-mode" value="rtsp" class="peer sr-only" checked onclick="switchInputMode(this.value)">
+                            <div class="w-full py-2 rounded-full text-sm font-medium text-gray-500 peer-checked:bg-white peer-checked:text-primary peer-checked:shadow-sm transition-all duration-200">
+                                RTSP
+                            </div>
+                        </label>
+
+                        <!-- Video Option -->
+                        <label class="flex-1 text-center cursor-pointer z-10">
+                            <input type="radio" name="input-mode" value="video" class="peer sr-only" onclick="switchInputMode(this.value)">
+                            <div class="w-full py-2 rounded-full text-sm font-medium text-gray-500 peer-checked:bg-white peer-checked:text-primary peer-checked:shadow-sm transition-all duration-200">
+                                Input Video
+                            </div>
+                        </label>
+
+                        <!-- Image Option -->
+                        <label class="flex-1 text-center cursor-pointer z-10">
+                            <input type="radio" name="input-mode" value="image" class="peer sr-only" onclick="switchInputMode(this.value)">
+                            <div class="w-full py-2 rounded-full text-sm font-medium text-gray-500 peer-checked:bg-white peer-checked:text-primary peer-checked:shadow-sm transition-all duration-200">
+                                Input Image
+                            </div>
+                        </label>
                     </div>
                 </div>
 
-                <!-- Input Image Panel -->
-                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-                    <h3 class="text-xl font-bold text-primary mb-4">Input Image</h3>
+                <!-- Main Container (Redesigned) -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col gap-4 flex-1 relative">
+                    <h3 class="text-xl font-bold text-primary">Main Container</h3>
 
-                    <!-- Image Upload Area -->
-                    <div id="image-upload-area" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-primary transition-colors cursor-pointer">
-                        <input type="file" id="image-input" accept=".jpeg,.jpg,.png" class="hidden">
-                        <i class="fa-solid fa-cloud-upload-alt text-gray-400 text-4xl mb-3"></i>
-                        <p class="text-gray-600 font-medium">Click to upload image</p>
-                        <p class="text-gray-400 text-sm">or drag and drop</p>
-                        <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 1MB</p>
+                    <!-- Zone 1: Shared Display/Drop Area -->
+                    <div class="relative bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex-1 min-h-[400px] flex items-center justify-center overflow-hidden group transition-colors hover:border-primary/50" id="display-zone">
+                        
+                        <!-- Click/Drop Handlers -->
+                        <input type="file" id="video-file" accept="video/*" class="hidden">
+                        <input type="file" id="image-file-input" accept="image/*" class="hidden">
+                        
+                        <!-- Placeholder Content -->
+                        <div id="stream-placeholder" class="text-center pointer-events-none">
+                            <!-- Dynamic Content set by JS -->
+                            <i class="fa-regular fa-circle-play text-gray-400 text-6xl mb-4"></i>
+                            <p id="placeholder-text" class="text-gray-400 font-medium">&lt;Camera RTSP Live Stream&gt;</p>
+                        </div>
+
+                        <!-- Live Indicator -->
+                        <div id="live-indicator" class="hidden absolute top-4 left-4 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse z-20">
+                            LIVE
+                        </div>
+
+                        <!-- Media Display (Image/Stream) -->
+                        <img id="mock-video-feed" src="" alt="Stream" class="hidden w-full h-full object-contain border-2 border-transparent transition-colors duration-200 z-10 relative">
+                        
+                        <!-- Upload Overlay (Clickable for Image/Video modes) -->
+                        <div id="upload-overlay" class="absolute inset-0 z-50 hidden cursor-pointer"></div>
                     </div>
 
-                    <!-- Uploaded Image Preview (Hidden by default) -->
-                    <div id="image-preview-container" class="hidden mt-4">
-                        <div class="relative">
-                            <img id="uploaded-image-preview" src="" alt="Uploaded image" class="w-full h-64 object-cover rounded-lg border border-gray-200">
-                            <button id="clear-image-btn" class="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center">
-                                <i class="fa-solid fa-times"></i>
-                            </button>
+                    <!-- Zone 2: Control Panels -->
+                    
+                    <!-- RTSP Controls -->
+                    <div id="rtsp-panel" class="input-panel">
+                        <div class="mt-2">
+                            <label class="block text-sm font-medium text-gray-600 mb-2">Input RTSP URL</label>
+                            <div class="flex gap-3">
+                                <div class="flex-1 relative">
+                                    <input type="text" id="rtsp-url-input"
+                                        class="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                        placeholder="rtsp://192.168.1.100:554/stream or '0' for webcam">
+                                </div>
+                                <button onclick="setRtspUrl()" class="bg-primary hover:bg-blue-800 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-md">
+                                    <i class="fa-solid fa-play mr-2"></i>
+                                    ENTER
+                                </button>
+                                <button onclick="stopRtspStreaming()" class="bg-red-500 hover:bg-red-600 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-md">
+                                    <i class="fa-solid fa-stop mr-2"></i>
+                                    STOP
+                                </button>
+                            </div>
                         </div>
+                    </div>
+
+                    <!-- Video Controls (File Info Row) -->
+                    <div id="video-panel" class="input-panel hidden">
+                        <div class="mt-2">
+                            <h4 class="text-primary font-bold mb-2">Video</h4>
+                            <div id="video-file-info" class="hidden border-2 border-dashed border-gray-300 rounded-xl p-2 flex items-center justify-between bg-white">
+                                <div class="flex items-center gap-3">
+                                    <div class="px-3 py-1 bg-gray-100 rounded-lg border border-gray-200 text-gray-500 text-sm font-medium">
+                                        {Video}
+                                    </div>
+                                    <span id="video-filename" class="text-gray-500 text-sm">{file_name}</span>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="document.getElementById('video-file').click()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors shadow-md">
+                                        <i class="fa-solid fa-folder-open mr-2"></i>
+                                        Browse Files
+                                    </button>
+                                    <button onclick="clearVideo()" class="bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-lg flex items-center justify-center transition-colors shadow-sm">
+                                        <i class="fa-solid fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Video Playback Controls (Appears when video is loaded) -->
+                            <div id="video-playback-controls" class="hidden mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                <div class="flex items-center space-x-3">
+                                    <button id="play-pause-btn" onclick="toggleVideoPlayback()" class="text-gray-600 hover:text-primary transition-colors">
+                                        <i class="fa-solid fa-play text-xl"></i>
+                                    </button>
+                                    <input type="range" id="video-seek" min="0" max="100" value="0" class="flex-1 accent-primary h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer" onchange="seekVideo(this.value)">
+                                    <span id="frame-counter" class="text-xs font-mono text-gray-500 w-16 text-right">0/0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Image Controls (File Info Row) -->
+                    <div id="image-panel" class="input-panel hidden">
+                        <div class="mt-2">
+                            <h4 class="text-primary font-bold mb-2">Image</h4>
+                            <div id="image-file-info" class="hidden border-2 border-dashed border-gray-300 rounded-xl p-2 flex items-center justify-between bg-white">
+                                <div class="flex items-center gap-3">
+                                    <div class="px-3 py-1 bg-gray-100 rounded-lg border border-gray-200 text-gray-500 text-sm font-medium">
+                                        {Image}
+                                    </div>
+                                    <span id="image-filename" class="text-gray-500 text-sm">{file_name}</span>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="document.getElementById('image-file-input').click()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors shadow-md">
+                                        <i class="fa-solid fa-folder-open mr-2"></i>
+                                        Browse Files
+                                    </button>
+                                    <button onclick="clearUploadedImage()" class="bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-lg flex items-center justify-center transition-colors shadow-sm">
+                                        <i class="fa-solid fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Hidden Input Image Preview Panel (Legacy, keeping for safety but hidden) -->
+                <div id="input-image-panel" class="hidden">
+                    <div id="image-preview-container">
+                        <img id="uploaded-image-preview" src="">
                     </div>
                 </div>
 

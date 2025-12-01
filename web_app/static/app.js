@@ -4,9 +4,17 @@ const WS_URL = "ws://127.0.0.1:8000/ws/monitor";
 
 // --- 1. Utilities (Time) ---
 function updateTime() {
+    const timeEl = document.getElementById('clock-time');
+    const dateEl = document.getElementById('clock-date');
+
+    if (!timeEl || !dateEl) {
+        console.warn('Clock elements not found');
+        return;
+    }
+
     const now = new Date();
-    document.getElementById('clock-time').textContent = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    document.getElementById('clock-date').textContent = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+    timeEl.textContent = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    dateEl.textContent = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
 }
 setInterval(updateTime, 1000);
 updateTime();
@@ -31,6 +39,9 @@ socket.onmessage = (event) => {
     }
 };
 
+// Prevent WebSocket errors when closed
+socket.onclose = () => console.log("WebSocket connection closed.");
+
 // --- 4. API Call Functions ---
 async function postData(endpoint, body) {
     try {
@@ -50,26 +61,35 @@ async function postData(endpoint, body) {
 
 // --- 5. UI Event Handlers ---
 function activateStream() {
-    const url = document.getElementById('rtsp-input').value;
-    if (!url.trim()) return alert("Please enter a valid RTSP URL");
-    
-    document.getElementById('stream-placeholder').innerHTML = '<div class="loader"></div><p class="mt-2 text-sm text-gray-500">Connecting to RTSP...</p>';
-    
-    postData("/api/config/stream", { url }).then(data => {
-        if(data) {
+    const urlEl = document.getElementById('rtsp-url-input');
+    const placeholderEl = document.getElementById('stream-placeholder');
+    const liveIndicatorEl = document.getElementById('live-indicator');
+    const videoFeedEl = document.getElementById('mock-video-feed');
+
+    if (!urlEl || !urlEl.value.trim()) {
+        alert("Please enter a valid RTSP URL");
+        return;
+    }
+
+    placeholderEl.innerHTML = '<div class="loader"></div><p class="mt-2 text-sm text-gray-500">Connecting to RTSP...</p>';
+
+    postData("/api/config/stream", { url: urlEl.value }).then(data => {
+        if(data && data.status === 'success') {
             console.log("Stream activation response:", data);
-            document.getElementById('stream-placeholder').classList.add('hidden');
-            document.getElementById('live-indicator').classList.remove('hidden');
-            document.getElementById('mock-video-feed').classList.remove('hidden');
+            placeholderEl.classList.add('hidden');
+            if (liveIndicatorEl) liveIndicatorEl.classList.remove('hidden');
+            if (videoFeedEl) videoFeedEl.classList.remove('hidden');
         }
     });
 }
 
 function processPrompt() {
-    const inputVal = document.getElementById('prompt-input').value;
-    if (!inputVal.trim()) return;
-    document.getElementById('object-description').innerHTML = '<div class="loader"></div>';
-    postData("/api/config/prompt", { object_name: inputVal }).then(data => console.log("Prompt set response:", data));
+    const inputEl = document.getElementById('prompt-input');
+    const descEl = document.getElementById('object-description');
+
+    if (!inputEl || !inputEl.value.trim()) return;
+    descEl.innerHTML = '<div class="loader"></div>';
+    postData("/api/config/prompt", { object_name: inputEl.value }).then(data => console.log("Prompt set response:", data));
 }
 
 function stopProcessing() {
@@ -175,12 +195,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('select-object-toggle').addEventListener('change', toggleClickSelectMode);
     document.getElementById('mock-video-feed').addEventListener('click', handleVideoClick);
-    
+
     // Add Stop button listener
     // Check if element exists first to avoid errors if HTML isn't updated yet
     const stopBtn = document.getElementById('stop-processing-btn');
     if (stopBtn) {
         stopBtn.addEventListener('click', stopProcessing);
+    }
+
+    // Add file input event listeners with null checking
+    const videoFileInput = document.getElementById('video-file');
+    const imageFileInput = document.getElementById('image-file-input');
+
+    if (videoFileInput) {
+        videoFileInput.addEventListener('change', uploadVideo);
+        console.log("Video file input listener added successfully");
+    } else {
+        console.error("Video file input element not found!");
+    }
+
+    if (imageFileInput) {
+        imageFileInput.addEventListener('change', uploadImage);
+        console.log("Image file input listener added successfully");
+    } else {
+        console.error("Image file input element not found!");
+    }
+
+    // Initialize setup functions
+    setupSmartPromptDropdown();
+    initializeInputModeSwitching();
+
+    // Add video seek listener with null checking
+    const videoSeek = document.getElementById('video-seek');
+    if (videoSeek) {
+        videoSeek.addEventListener('input', (e) => {
+            seekVideo(e.target.value);
+        });
+        console.log("Video seek listener added successfully");
+    } else {
+        console.error("Video seek element not found!");
     }
 });
 
@@ -193,14 +246,38 @@ function updateDashboard(data) {
     const progressBar = document.getElementById('progress-bar');
     const progressLegend = document.getElementById('progress-legend');
     const videoFeed = document.getElementById('mock-video-feed');
-    
+
     animateValue(countEl, frontendState.currentCount, analytics.count, 500);
     frontendState.currentCount = analytics.count;
 
+    // Handle video metadata updates
+    if (analytics.input_mode === 'video') {
+        updateVideoProgress(analytics.video_current_frame, analytics.video_total_frames);
+
+        // Update video play/pause button state
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        if (playPauseBtn) {
+            if (analytics.video_playing) {
+                playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+            } else {
+                playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+            }
+        }
+
+        // Update video metadata display
+        const currentFrameEl = document.getElementById('current-frame');
+        const totalFramesEl = document.getElementById('total-frames');
+        const fpsEl = document.getElementById('video-fps');
+
+        if (currentFrameEl) currentFrameEl.textContent = analytics.video_current_frame || 0;
+        if (totalFramesEl) totalFramesEl.textContent = analytics.video_total_frames || 0;
+        if (fpsEl) fpsEl.textContent = (analytics.video_fps || 0).toFixed(1);
+    }
+
     if(data.video_frame && data.video_frame.startsWith('data:image')) {
        videoFeed.src = data.video_frame;
-       
-       // Use class toggling instead of inline styles/setTimeout to prevent layout thrashing
+
+       // Use class toggling instead of inline styles/setTimeout to prevent layout thrasing
        if (analytics.detected_object && analytics.detected_object !== "N/A") {
            videoFeed.classList.remove('border-transparent');
            videoFeed.classList.add('border-primary');
@@ -276,137 +353,6 @@ function animateValue(obj, start, end, duration) {
     window.requestAnimationFrame(step);
 }
 
-// --- 8. Image Upload Functions ---
-function setupImageUpload() {
-    const uploadArea = document.getElementById('image-upload-area');
-    const fileInput = document.getElementById('image-input');
-    const previewContainer = document.getElementById('image-preview-container');
-    const imagePreview = document.getElementById('uploaded-image-preview');
-    const clearBtn = document.getElementById('clear-image-btn');
-
-    uploadArea.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', handleFileSelect);
-    clearBtn.addEventListener('click', clearUploadedImage);
-
-    uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.classList.add('border-primary', 'bg-primary/10');
-    });
-
-    uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('border-primary', 'bg-primary/10');
-    });
-
-    uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadArea.classList.remove('border-primary', 'bg-primary/10');
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            handleFile(files[0]);
-        }
-    });
-}
-
-function handleFileSelect(e) {
-    const file = e.target.files[0];
-    if (file) {
-        handleFile(file);
-    }
-}
-
-function handleFile(file) {
-    if (!file.type.startsWith('image/')) {
-        alert('Please select an image file');
-        return;
-    }
-    if (file.size > 1 * 1024 * 1024) {
-        alert('File size must be less than 1MB');
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    document.getElementById('image-upload-area').innerHTML = `
-        <i class="fa-solid fa-spinner fa-spin text-gray-400 text-4xl mb-3"></i>
-        <p class="text-gray-600 font-medium">Uploading...</p>
-    `;
-
-    fetch(`${API_BASE_URL}/api/upload/image`, {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        resetUploadArea();
-        if (data.status === 'success') {
-            displayUploadedImage(file);
-            console.log('Image uploaded successfully:', data.message);
-        } else {
-            alert('Upload failed: ' + data.message);
-        }
-    })
-    .catch(error => {
-        console.error('Upload error:', error);
-        alert('Upload failed');
-        resetUploadArea();
-    });
-}
-
-function resetUploadArea() {
-    document.getElementById('image-upload-area').innerHTML = `
-        <input type="file" id="image-input" accept=".jpeg,.jpg,.png" class="hidden">
-        <i class="fa-solid fa-cloud-upload-alt text-gray-400 text-4xl mb-3"></i>
-        <p class="text-gray-600 font-medium">Click to upload image</p>
-        <p class="text-gray-400 text-sm">or drag and drop</p>
-        <p class="text-gray-400 text-xs mt-2">JPEG, JPG, PNG up to 1MB</p>
-    `;
-    document.getElementById('image-input').addEventListener('change', handleFileSelect);
-    document.getElementById('image-upload-area').addEventListener('click', () => {
-        document.getElementById('image-input').click();
-    });
-}
-
-function displayUploadedImage(file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const preview = document.getElementById('uploaded-image-preview');
-        const container = document.getElementById('image-preview-container');
-        preview.src = e.target.result;
-        container.classList.remove('hidden');
-
-        // Update video feed to show uploaded image
-        document.getElementById('mock-video-feed').src = e.target.result;
-        document.getElementById('mock-video-feed').classList.remove('hidden');
-        document.getElementById('stream-placeholder').classList.add('hidden');
-        document.getElementById('live-indicator').classList.add('hidden'); // Hide LIVE indicator for static image
-    };
-    reader.readAsDataURL(file);
-}
-
-function clearUploadedImage() {
-    postData("/api/config/clear-image", {}).then(data => {
-        if (data.status === 'success') {
-            // Hide preview
-            document.getElementById('image-preview-container').classList.add('hidden');
-            document.getElementById('image-input').value = '';
-            
-            // Reset video feed area to default state
-            document.getElementById('mock-video-feed').classList.add('hidden');
-            document.getElementById('mock-video-feed').src = ""; 
-            document.getElementById('stream-placeholder').classList.remove('hidden');
-            
-            // Restore LIVE indicator if RTSP was active (logic could be refined, but simple reset is safer)
-            document.getElementById('live-indicator').classList.add('hidden');
-            document.getElementById('stream-placeholder').innerHTML = `
-                <i class="fa-regular fa-circle-play text-gray-400 text-6xl mb-4 group-hover:text-primary transition-colors"></i>
-                <p class="text-gray-400 font-medium">&lt;Camera RTSP Live Stream&gt;</p>
-            `;
-            
-            console.log('Image cleared');
-        }
-    });
-}
 
 // --- 9. Smart Prompt Dropdown Functions ---
 function setupSmartPromptDropdown() {
@@ -444,7 +390,735 @@ function setupSmartPromptDropdown() {
     });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    setupImageUpload();
-    setupSmartPromptDropdown();
-});
+// --- 10. Input Mode Management Functions ---
+function initializeInputModeSwitching() {
+    console.log("Initializing Input Mode Switching...");
+    
+    // Initialize with RTSP mode (default)
+    switchInputMode('rtsp');
+
+    // Set up event listeners for radio buttons
+    document.querySelectorAll('input[name="input-mode"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.checked) switchInputMode(e.target.value);
+        });
+    });
+    
+    // Setup Shared Drop Zone Logic
+    const dropZone = document.getElementById('display-zone');
+    const overlay = document.getElementById('upload-overlay');
+    
+    if (!overlay) console.error("Upload overlay element NOT found!");
+    if (!dropZone) console.error("Display zone element NOT found!");
+
+    // Forward clicks on overlay to the correct file input
+    if (overlay) {
+        // Make sure overlay is clickable and visible
+        overlay.style.cursor = 'pointer';
+        overlay.style.zIndex = '50';
+
+        overlay.addEventListener('click', (e) => {
+            console.log("Overlay clicked!");
+            e.preventDefault();
+            e.stopPropagation();
+
+            const modeInput = document.querySelector('input[name="input-mode"]:checked');
+            if (!modeInput) {
+                console.error("No input mode selected!");
+                alert("Please select an input mode first (Video or Image)");
+                return;
+            }
+
+            const mode = modeInput.value;
+            console.log(`Current mode: ${mode}`);
+
+            if (mode === 'video') {
+                const fileInput = document.getElementById('video-file');
+                console.log("Triggering Video Input click", fileInput);
+                if (fileInput) {
+                    fileInput.accept = 'video/*';
+                    fileInput.click();
+                } else {
+                    console.error("Video file input not found!");
+                    alert("Video file input not found. Please refresh the page.");
+                }
+            } else if (mode === 'image') {
+                const fileInput = document.getElementById('image-file-input');
+                console.log("Triggering Image Input click", fileInput);
+                if (fileInput) {
+                    fileInput.accept = 'image/*';
+                    fileInput.click();
+                } else {
+                    console.error("Image file input not found!");
+                    alert("Image file input not found. Please refresh the page.");
+                }
+            } else if (mode === 'rtsp') {
+                console.log("RTSP mode - no file upload needed");
+                alert("RTSP mode uses stream input, not file upload. Please enter an RTSP URL.");
+            }
+        });
+    }
+
+    // Handle file selection
+    const videoFileInput = document.getElementById('video-file');
+    if (videoFileInput) {
+        videoFileInput.addEventListener('change', (e) => {
+            console.log("Video file selected:", e.target.files[0]);
+            uploadVideo();
+        });
+    }
+    
+    const imageFileInput = document.getElementById('image-file-input');
+    if (imageFileInput) {
+        imageFileInput.addEventListener('change', (e) => {
+            console.log("Image file selected:", e.target.files[0]);
+            uploadImage();
+        });
+    }
+
+    // Drag & Drop Support
+    if (dropZone) {
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-primary', 'bg-primary/5');
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-primary', 'bg-primary/5');
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            try {
+                e.preventDefault();
+                dropZone.classList.remove('border-primary', 'bg-primary/5');
+                console.log("File dropped! Files count:", e.dataTransfer.files.length);
+
+                // Get current mode with null checking
+                const modeInput = document.querySelector('input[name="input-mode"]:checked');
+                if (!modeInput) {
+                    console.error("No input mode selected when file dropped");
+                    alert("Please select an input mode first (RTSP, Video, or Image)");
+                    return;
+                }
+
+                const mode = modeInput.value;
+                console.log("Current mode:", mode);
+
+                if (e.dataTransfer.files.length === 0) {
+                    console.log("No files in drop event");
+                    return;
+                }
+
+                const file = e.dataTransfer.files[0];
+                console.log("Dropped file:", file.name, file.type, file.size);
+
+                if (mode === 'video') {
+                    if (file.type.startsWith('video/')) {
+                        console.log("Processing video drop");
+                        if (videoFileInput) {
+                            // Directly call uploadVideo with the file
+                            const tempInput = document.createElement('input');
+                            tempInput.type = 'file';
+                            tempInput.files = e.dataTransfer.files;
+
+                            // Simulate the file selection
+                            videoFileInput.files = e.dataTransfer.files;
+
+                            console.log("Video file assigned to input, calling uploadVideo()");
+                            uploadVideo();
+                        } else {
+                            console.error("Video file input element not found!");
+                            alert("Video file input not found. Please refresh the page.");
+                        }
+                    } else {
+                        console.warn("Invalid file type for video mode:", file.type);
+                        alert(`Please drop a valid video file (MP4, AVI, MOV, etc.). Current file: ${file.type}`);
+                    }
+                } else if (mode === 'image') {
+                    if (file.type.startsWith('image/')) {
+                        console.log("Processing image drop");
+                        if (imageFileInput) {
+                            // Directly call uploadImage with the file
+                            const tempInput = document.createElement('input');
+                            tempInput.type = 'file';
+                            tempInput.files = e.dataTransfer.files;
+
+                            // Simulate the file selection
+                            imageFileInput.files = e.dataTransfer.files;
+
+                            console.log("Image file assigned to input, calling uploadImage()");
+                            uploadImage();
+                        } else {
+                            console.error("Image file input element not found!");
+                            alert("Image file input not found. Please refresh the page.");
+                        }
+                    } else {
+                        console.warn("Invalid file type for image mode:", file.type);
+                        alert(`Please drop a valid image file (JPEG, PNG, etc.). Current file: ${file.type}`);
+                    }
+                } else {
+                    console.warn("Drop not supported in mode:", mode);
+                    alert(`File upload is not supported in ${mode} mode. Please select Video or Image mode.`);
+                }
+            } catch (error) {
+                console.error("Error handling file drop:", error);
+                alert("Error processing dropped file: " + error.message);
+            }
+        });
+    }
+}
+
+async function switchInputMode(mode) {
+    console.log(`Switching to mode: ${mode}`);
+
+    // 1. Hide all Control Panels
+    document.getElementById('rtsp-panel').classList.add('hidden');
+    document.getElementById('video-panel').classList.add('hidden');
+    document.getElementById('image-panel').classList.add('hidden');
+
+    // 2. Show Selected Control Panel
+    const targetPanel = document.getElementById(`${mode}-panel`);
+    if (targetPanel) targetPanel.classList.remove('hidden');
+    
+    // 3. Update Display Zone Placeholder & Overlay
+    const placeholderHtml = document.getElementById('stream-placeholder');
+    const overlay = document.getElementById('upload-overlay');
+    const streamFeed = document.getElementById('mock-video-feed');
+    
+    if (!placeholderHtml) return;
+
+    if (mode === 'rtsp') {
+        placeholderHtml.innerHTML = `
+            <i class="fa-regular fa-circle-play text-gray-400 text-6xl mb-4"></i>
+            <p class="text-gray-400 font-medium">&lt;Camera RTSP Live Stream&gt;</p>
+        `;
+        if (overlay) overlay.classList.add('hidden'); // Disable click-to-upload
+        placeholderHtml.classList.remove('hidden');
+        if (streamFeed) streamFeed.classList.add('hidden');
+    } 
+    else if (mode === 'video') {
+        placeholderHtml.innerHTML = `
+            <p class="text-gray-400 text-lg mb-2">Drop Video File Here</p>
+            <p class="text-gray-400 text-sm mb-4">or</p>
+            <button onclick="document.getElementById('video-file').click()" class="bg-primary hover:bg-blue-800 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-md pointer-events-auto relative z-50">
+                <i class="fa-solid fa-folder-open mr-2"></i>
+                Browse Files
+            </button>
+        `;
+        // Show overlay only if no file is loaded yet
+        const infoPanel = document.getElementById('video-file-info');
+        const isInfoHidden = infoPanel && infoPanel.classList.contains('hidden');
+        console.log(`Video mode: Info hidden? ${isInfoHidden}`);
+        
+        if (isInfoHidden) {
+             if (overlay) overlay.classList.add('hidden'); // Hide overlay so button is clickable
+             placeholderHtml.classList.remove('hidden');
+             if (streamFeed) streamFeed.classList.add('hidden');
+             // Re-enable overlay for drag/drop on the container background if needed, 
+             // but for now, let's rely on the button and the drop zone event listeners.
+             // To make the whole area clickable again without blocking the button, we'd need complex layering.
+             // The user specifically asked for the button.
+        } else {
+             // File already loaded, show feed
+             if (overlay) overlay.classList.add('hidden');
+        }
+    } 
+    else if (mode === 'image') {
+        placeholderHtml.innerHTML = `
+            <p class="text-gray-400 text-lg mb-2">Drop Image File Here</p>
+            <p class="text-gray-400 text-sm mb-4">or</p>
+            <button onclick="document.getElementById('image-file-input').click()" class="bg-primary hover:bg-blue-800 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-md pointer-events-auto relative z-50">
+                <i class="fa-solid fa-folder-open mr-2"></i>
+                Browse Files
+            </button>
+        `;
+        // Show overlay only if no file is loaded yet
+        const infoPanel = document.getElementById('image-file-info');
+        const isInfoHidden = infoPanel && infoPanel.classList.contains('hidden');
+        console.log(`Image mode: Info hidden? ${isInfoHidden}`);
+
+        if (isInfoHidden) {
+             if (overlay) overlay.classList.add('hidden'); // Hide overlay so button is clickable
+             placeholderHtml.classList.remove('hidden');
+             if (streamFeed) streamFeed.classList.add('hidden');
+        } else {
+             if (overlay) overlay.classList.add('hidden');
+        }
+    }
+
+    // 4. Notify Backend
+    try {
+        await postData('/api/config/input-mode', { mode: mode });
+    } catch (error) {
+        console.error('Error switching input mode:', error);
+    }
+}
+
+async function setRtspUrl() {
+    const url = document.getElementById('rtsp-url-input').value;
+    console.log("RTSP URL input:", url);
+
+    // Support device '0' for local webcam
+    if (!url.trim()) {
+        // Auto-fill with device 0 if empty
+        document.getElementById('rtsp-url-input').value = '0';
+        const deviceUrl = '0';
+        console.log("Auto-setting device to:", deviceUrl);
+
+        document.getElementById('stream-placeholder').innerHTML = '<div class="loader"></div><p class="mt-2 text-sm text-gray-500">Connecting to local device...</p>';
+
+        try {
+            const response = await postData("/api/config/stream", { url: deviceUrl });
+            if (response.status === 'success') {
+                document.getElementById('stream-placeholder').classList.add('hidden');
+                document.getElementById('live-indicator').classList.remove('hidden');
+                document.getElementById('upload-overlay').classList.add('hidden'); // Disable drop zone for RTSP
+                console.log("Device connection successful");
+            }
+        } catch (error) {
+            console.error("Error connecting to device:", error);
+            alert("Failed to connect to device. Please check device permissions.");
+            switchInputMode('rtsp');
+        }
+        return;
+    }
+
+    // Handle URL format with device parameter
+    let processedUrl = url.trim();
+
+    // Convert device '0' to proper format
+    if (processedUrl === '0') {
+        processedUrl = '0'; // Keep as device index
+        document.getElementById('stream-placeholder').innerHTML = '<div class="loader"></div><p class="mt-2 text-sm text-gray-500">Connecting to local device (webcam)...</p>';
+    } else if (!processedUrl.startsWith('rtsp://') && processedUrl !== '0') {
+        // Auto-add rtsp:// prefix if missing
+        if (!processedUrl.includes('://')) {
+            processedUrl = 'rtsp://' + processedUrl;
+        }
+        document.getElementById('stream-placeholder').innerHTML = '<div class="loader"></div><p class="mt-2 text-sm text-gray-500">Connecting to RTSP stream...</p>';
+    }
+
+    console.log("Processed URL:", processedUrl);
+
+    try {
+        const response = await postData("/api/config/stream", { url: processedUrl });
+        if (response.status === 'success') {
+            document.getElementById('stream-placeholder').classList.add('hidden');
+            document.getElementById('live-indicator').classList.remove('hidden');
+            document.getElementById('upload-overlay').classList.add('hidden'); // Disable drop zone for RTSP
+            document.getElementById('mock-video-feed').classList.remove('hidden');
+            console.log("RTSP connection successful");
+        } else {
+            alert('Failed to connect to RTSP: ' + response.message);
+            switchInputMode('rtsp'); // Reset UI
+        }
+    } catch (error) {
+        console.error('RTSP connection error:', error);
+        alert('Error connecting to RTSP. Please check if the backend is running.');
+        switchInputMode('rtsp');
+    }
+}
+
+async function uploadVideo() {
+    try {
+        console.log("uploadVideo() function called");
+
+        const fileInput = document.getElementById('video-file');
+        if (!fileInput) {
+            console.error("Video file input element not found!");
+            alert("Video file input not found. Please refresh the page.");
+            return;
+        }
+
+        const file = fileInput.files[0];
+        if (!file) {
+            console.log("No video file selected");
+            return;
+        }
+
+        // Validate file type
+        if (!file.type.startsWith('video/')) {
+            alert("Please select a valid video file");
+            return;
+        }
+
+        console.log("Uploading video file:", file.name, file.type, file.size);
+
+        // Show loading in placeholder
+        const streamPlaceholder = document.getElementById('stream-placeholder');
+        if (streamPlaceholder) {
+            streamPlaceholder.innerHTML = `
+                <div class="loader"></div><p class="mt-2 text-sm text-gray-500">Uploading ${file.name}...</p>
+            `;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        console.log("Sending video upload request to:", `${API_BASE_URL}/api/upload/video`);
+
+        const response = await fetch(`${API_BASE_URL}/api/upload/video`, {
+            method: 'POST',
+            body: formData
+        });
+
+        console.log("Video upload response status:", response.status);
+
+        const result = await response.json();
+        console.log("Video upload response data:", result);
+
+        if (response.ok && result.status === 'success') {
+            // 1. Update Control Panel (Show File Info)
+            const videoFilename = document.getElementById('video-filename');
+            const videoFileInfo = document.getElementById('video-file-info');
+            const videoPlaybackControls = document.getElementById('video-playback-controls');
+
+            if (videoFilename) videoFilename.textContent = file.name;
+            if (videoFileInfo) videoFileInfo.classList.remove('hidden');
+            if (videoPlaybackControls) videoPlaybackControls.classList.remove('hidden');
+
+            // 2. Update Display Zone
+            const uploadOverlay = document.getElementById('upload-overlay');
+            if (uploadOverlay) uploadOverlay.classList.add('hidden'); // Disable drop zone
+
+            if (streamPlaceholder) streamPlaceholder.classList.add('hidden');
+
+            const mockVideoFeed = document.getElementById('mock-video-feed');
+            if (mockVideoFeed) mockVideoFeed.classList.remove('hidden');
+
+            updateVideoMetadata(result);
+            await switchInputMode('video'); // Refresh backend state
+
+            console.log("Video upload successful");
+        } else {
+            console.error("Video upload failed:", result);
+            alert('Failed to upload video: ' + (result.message || 'Unknown error'));
+            switchInputMode('video'); // Reset
+        }
+    } catch (error) {
+        console.error('Error uploading video:', error);
+        alert('Error uploading video: ' + error.message);
+
+        // Reset UI on error
+        try {
+            await switchInputMode('video');
+        } catch (resetError) {
+            console.error("Error resetting video mode:", resetError);
+        }
+    }
+}
+
+async function clearVideo() {
+    // Reset backend
+    await switchInputMode('video'); 
+    
+    // Reset UI
+    document.getElementById('video-file-info').classList.add('hidden');
+    document.getElementById('video-playback-controls').classList.add('hidden');
+    document.getElementById('video-file').value = '';
+    
+    // Reset Display Zone by calling switchInputMode again which checks the 'hidden' class
+    switchInputMode('video');
+}
+
+async function uploadImage() {
+    try {
+        console.log("uploadImage() function called");
+
+        const fileInput = document.getElementById('image-file-input');
+        if (!fileInput) {
+            console.error("Image file input element not found!");
+            alert("Image file input not found. Please refresh the page.");
+            return;
+        }
+
+        const file = fileInput.files[0];
+        if (!file) {
+            console.log("No image file selected");
+            return;
+        }
+
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+            alert("Please select a valid image file");
+            return;
+        }
+
+        console.log("Uploading image file:", file.name, file.type, file.size);
+
+        // Show loading in placeholder
+        const streamPlaceholder = document.getElementById('stream-placeholder');
+        if (streamPlaceholder) {
+            streamPlaceholder.innerHTML = `
+                <div class="loader"></div><p class="mt-2 text-sm text-gray-500">Uploading ${file.name}...</p>
+            `;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        console.log("Sending image upload request to:", `${API_BASE_URL}/api/upload/image`);
+
+        const response = await fetch(`${API_BASE_URL}/api/upload/image`, {
+            method: 'POST',
+            body: formData
+        });
+
+        console.log("Image upload response status:", response.status);
+
+        const result = await response.json();
+        console.log("Image upload response data:", result);
+
+        if (response.ok && result.status === 'success') {
+            // 1. Update Control Panel
+            const imageFilename = document.getElementById('image-filename');
+            const imageFileInfo = document.getElementById('image-file-info');
+
+            if (imageFilename) imageFilename.textContent = file.name;
+            if (imageFileInfo) imageFileInfo.classList.remove('hidden');
+
+            // 2. Update Display Zone (Preview local file immediately or wait for websocket)
+            try {
+                displayUploadedImage(file);
+            } catch (displayError) {
+                console.error("Error displaying uploaded image:", displayError);
+            }
+
+            const uploadOverlay = document.getElementById('upload-overlay');
+            if (uploadOverlay) uploadOverlay.classList.add('hidden');
+
+            if (streamPlaceholder) streamPlaceholder.classList.add('hidden');
+
+            console.log("Image upload successful");
+        } else {
+            console.error("Image upload failed:", result);
+            alert('Failed to upload image: ' + (result.message || 'Unknown error'));
+            switchInputMode('image');
+        }
+    } catch (error) {
+        console.error('Error uploading image:', error);
+        alert('Error uploading image: ' + error.message);
+
+        // Reset UI on error
+        try {
+            await switchInputMode('image');
+        } catch (resetError) {
+            console.error("Error resetting image mode:", resetError);
+        }
+    }
+}
+
+function displayUploadedImage(file) {
+    try {
+        console.log("Displaying uploaded image:", file.name);
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const videoFeed = document.getElementById('mock-video-feed');
+            if (!videoFeed) {
+                console.error("Mock video feed element not found for image display!");
+                return;
+            }
+
+            console.log("Setting image source to video feed element");
+            videoFeed.src = e.target.result;
+            videoFeed.classList.remove('hidden');
+
+            // For images, we should use img element properties
+            videoFeed.alt = `Uploaded image: ${file.name}`;
+        };
+        reader.readAsDataURL(file);
+    } catch (error) {
+        console.error("Error displaying uploaded image:", error);
+        alert("Error displaying uploaded image: " + error.message);
+    }
+}
+
+async function clearUploadedImage() {
+    try {
+        console.log("Clearing uploaded image...");
+
+        const response = await postData("/api/config/clear-image", {});
+        if (response.status === 'success') {
+            console.log("Image clear response successful");
+
+            // Reset UI with null checking
+            const imageFileInfo = document.getElementById('image-file-info');
+            const imageFileInput = document.getElementById('image-file-input');
+            const mockVideoFeed = document.getElementById('mock-video-feed');
+            const streamPlaceholder = document.getElementById('stream-placeholder');
+
+            if (imageFileInfo) {
+                imageFileInfo.classList.add('hidden');
+                console.log("Hidden image file info panel");
+            }
+
+            if (imageFileInput) {
+                imageFileInput.value = '';
+                console.log("Cleared image file input");
+            }
+
+            // Reset display
+            if (mockVideoFeed) {
+                mockVideoFeed.classList.add('hidden');
+                mockVideoFeed.src = '';
+                mockVideoFeed.alt = '';
+                console.log("Hidden mock video feed");
+            }
+
+            if (streamPlaceholder) {
+                streamPlaceholder.classList.remove('hidden');
+                console.log("Shown stream placeholder");
+            }
+
+            console.log('Image cleared successfully');
+            switchInputMode('image');
+        }
+    } catch (error) {
+        console.error('Error clearing uploaded image:', error);
+    }
+}
+
+function updateVideoProgress(currentFrame, totalFrames) {
+    const videoSeek = document.getElementById('video-seek');
+    const frameCounter = document.getElementById('frame-counter');
+
+    if (videoSeek && frameCounter) {
+        videoSeek.value = currentFrame || 0;
+        frameCounter.textContent = `${currentFrame || 0}/${totalFrames || 0}`;
+    }
+}
+
+// --- Video Control Functions ---
+async function seekVideo(frameIndex) {
+    try {
+        const response = await postData("/api/config/video/seek", { frame: parseInt(frameIndex) });
+        console.log("Video seek response:", response);
+    } catch (error) {
+        console.error("Error seeking video:", error);
+    }
+}
+
+async function toggleVideoPlayback() {
+    try {
+        console.log("toggleVideoPlayback() function called");
+
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        if (!playPauseBtn) {
+            console.error("Play/pause button not found");
+            return;
+        }
+
+        const currentState = !playPauseBtn.innerHTML.includes('fa-play');
+        console.log("Current video state:", currentState ? "playing" : "paused");
+
+        const response = await postData("/api/config/video/play-pause", { playing: !currentState });
+        console.log("Video playback toggle response:", response);
+
+        // Update button icon immediately for better UX
+        if (response && response.status === 'success') {
+            const isPlaying = response.data && response.data.playing;
+            console.log("New playing state:", isPlaying);
+
+            playPauseBtn.innerHTML = isPlaying ?
+                '<i class="fa-solid fa-pause"></i>' :
+                '<i class="fa-solid fa-play"></i>';
+        }
+    } catch (error) {
+        console.error("Error toggling video playback:", error);
+    }
+}
+
+function updateVideoMetadata(metadata) {
+    if (!metadata) {
+        console.error("No metadata provided to updateVideoMetadata");
+        return;
+    }
+
+    // Update video seek slider
+    if (metadata.total_frames) {
+        const videoSeek = document.getElementById('video-seek');
+        if (videoSeek) {
+            videoSeek.max = metadata.total_frames;
+            videoSeek.value = 0;
+            console.log("Updated video seek slider max frames:", metadata.total_frames);
+        }
+    }
+
+    // Update FPS display
+    if (metadata.fps) {
+        const fpsEl = document.getElementById('video-fps');
+        if (fpsEl) {
+            fpsEl.textContent = metadata.fps.toFixed(1);
+        }
+    }
+
+    // Update frame counter
+    updateVideoProgress(0, metadata.total_frames || 0);
+
+    console.log("Video metadata updated:", metadata);
+}
+
+// --- RTSP Stop Streaming Function ---
+async function stopRtspStreaming() {
+    try {
+        console.log("stopRtspStreaming() function called");
+
+        const rtspInput = document.getElementById('rtsp-url-input');
+        if (!rtspInput) {
+            console.error("RTSP URL input element not found!");
+            return;
+        }
+
+        const currentUrl = rtspInput.value;
+        console.log("Stopping RTSP streaming for URL:", currentUrl);
+
+        // Show loading indicator
+        const streamPlaceholder = document.getElementById('stream-placeholder');
+        if (streamPlaceholder) {
+            streamPlaceholder.innerHTML = '<div class="loader"></div><p class="mt-2 text-sm text-gray-500">Stopping stream...</p>';
+        }
+
+        // Call backend API to stop streaming
+        const response = await postData("/api/config/stream", { url: "" });
+        if (response.status === 'success') {
+            console.log("RTSP stream stopped successfully");
+
+            // Reset UI
+            if (streamPlaceholder) {
+                streamPlaceholder.innerHTML = `
+                    <div class="text-center text-gray-500">
+                        <i class="fa-solid fa-video text-4xl mb-3"></i>
+                        <p class="font-medium">Waiting for RTSP input...</p>
+                        <p class="text-sm text-gray-400">Enter RTSP URL or use '0' for webcam</p>
+                    </div>
+                `;
+            }
+
+            const uploadOverlay = document.getElementById('upload-overlay');
+            if (uploadOverlay) {
+                uploadOverlay.classList.remove('hidden');
+            }
+
+            const liveIndicator = document.getElementById('live-indicator');
+            if (liveIndicator) {
+                liveIndicator.classList.add('hidden');
+            }
+
+            const mockVideoFeed = document.getElementById('mock-video-feed');
+            if (mockVideoFeed) {
+                mockVideoFeed.classList.add('hidden');
+            }
+
+            // Clear RTSP URL input
+            rtspInput.value = '';
+        } else {
+            console.error("Failed to stop RTSP stream:", response);
+            alert('Failed to stop RTSP stream: ' + (response.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error("Error stopping RTSP stream:", error);
+        alert('Error stopping RTSP stream: ' + error.message);
+    }
+}
+

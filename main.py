@@ -24,6 +24,15 @@ class ModelConfigRequest(BaseModel):
     mask_threshold: float = Field(0.5, ge=0.0, le=1.0)
     display_mode: str
 
+class InputModeRequest(BaseModel):
+    mode: str  # "rtsp", "video", or "image"
+
+class VideoSeekRequest(BaseModel):
+    frame: int
+
+class VideoPlaybackRequest(BaseModel):
+    playing: bool
+
 # --- 2. Application State & WebSocket Manager ---
 app_state: Dict[str, Any] = {
     "rtsp_url": None,
@@ -39,6 +48,16 @@ app_state: Dict[str, Any] = {
     "mask_threshold": 0.5,
     "display_mode": "segmentation", # "segmentation" or "bounding_box"
     "select_object_mode": False,
+    # New state for input mode management
+    "input_mode": "rtsp",              # "rtsp", "video", or "image"
+    "video_file_path": None,            # Path to uploaded video file
+    "video_current_frame": 0,           # Current frame index
+    "video_total_frames": None,         # Total frame count
+    "video_fps": None,                  # Video frames per second
+    "video_capture": None,              # VideoCapture instance for video files
+    "video_playing": True,              # Video playback state
+    "video_seek_request": None,         # Seek frame index
+    "video_speed": 1.0,                 # Playback speed multiplier
 }
 
 class ConnectionManager:
@@ -109,6 +128,131 @@ async def set_model_config(request: ModelConfigRequest):
     print(f"Model config updated: Confidence={request.confidence}, Mask={request.mask_threshold}, Display={request.display_mode}")
     return {"status": "success", "message": "Model config updated"}
 
+@app.post("/api/config/input-mode")
+async def set_input_mode(request: InputModeRequest):
+    """
+    Switch input mode and handle state conflicts.
+    """
+    mode = request.mode
+    if mode not in ["rtsp", "video", "image"]:
+        return {"status": "error", "message": "Invalid input mode"}
+
+    # Clear conflicting states
+    if mode == "rtsp":
+        app_state["uploaded_image_path"] = None
+        app_state["video_file_path"] = None
+        # Release video capture if exists
+        if app_state.get("video_capture"):
+            app_state["video_capture"].release()
+            app_state["video_capture"] = None
+
+    elif mode == "video":
+        app_state["rtsp_url"] = None
+        app_state["uploaded_image_path"] = None
+
+    elif mode == "image":
+        app_state["rtsp_url"] = None
+        app_state["video_file_path"] = None
+        # Release video capture if exists
+        if app_state.get("video_capture"):
+            app_state["video_capture"].release()
+            app_state["video_capture"] = None
+
+    app_state["input_mode"] = mode
+    app_state["prompt"] = None  # Clear existing prompts
+    app_state["point_prompt"] = None
+
+    print(f"Input mode switched to: {mode}")
+    return {"status": "success", "message": f"Input mode set to {mode}"}
+
+@app.post("/api/upload/video")
+async def upload_video(file: UploadFile = File(...)):
+    """
+    Upload a video file for local processing.
+    """
+    # Validate file type
+    if not file.content_type.startswith('video/'):
+        return {"status": "error", "message": "File must be a video"}
+
+    # Create uploads directory if not exists
+    os.makedirs("uploads", exist_ok=True)
+
+    # Save file
+    file_path = f"uploads/{file.filename}"
+    try:
+        # Read and save video file
+        contents = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+
+        # Test video file and get metadata
+        video_capture = cv2.VideoCapture(file_path)
+        if not video_capture.isOpened():
+            return {"status": "error", "message": "Failed to open video file"}
+
+        total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = video_capture.get(cv2.CAP_PROP_FPS)
+
+        # Release test capture
+        video_capture.release()
+
+        if total_frames <= 0:
+            return {"status": "error", "message": "Invalid video file - no frames found"}
+
+        # Update app state
+        app_state["video_file_path"] = file_path
+        app_state["video_current_frame"] = 0
+        app_state["video_total_frames"] = total_frames
+        app_state["video_fps"] = fps
+        app_state["video_playing"] = True
+        app_state["video_seek_request"] = None
+        app_state["input_mode"] = "video"
+
+        # Clear other input modes
+        app_state["rtsp_url"] = None
+        app_state["uploaded_image_path"] = None
+        app_state["prompt"] = None
+        app_state["point_prompt"] = None
+
+        print(f"Video uploaded successfully: {file.filename}")
+        print(f"Video metadata: {total_frames} frames, {fps:.2f} FPS")
+        return {
+            "status": "success",
+            "message": f"Video uploaded: {file.filename}",
+            "total_frames": total_frames,
+            "fps": fps
+        }
+
+    except Exception as e:
+        print(f"Error uploading video: {e}")
+        return {"status": "error", "message": f"Upload failed: {str(e)}"}
+
+@app.post("/api/config/video/seek")
+async def seek_video(request: VideoSeekRequest):
+    """
+    Seek to a specific frame in the video.
+    """
+    if not app_state.get("video_file_path"):
+        return {"status": "error", "message": "No video file loaded"}
+
+    frame_index = max(0, min(request.frame, app_state["video_total_frames"] - 1))
+    app_state["video_seek_request"] = frame_index
+    app_state["video_current_frame"] = frame_index
+
+    return {"status": "success", "message": f"Seeked to frame {frame_index}"}
+
+@app.post("/api/config/video/play-pause")
+async def toggle_video_playback(request: VideoPlaybackRequest):
+    """
+    Toggle video playback state.
+    """
+    if not app_state.get("video_file_path"):
+        return {"status": "error", "message": "No video file loaded"}
+
+    app_state["video_playing"] = request.playing
+    action = "playing" if request.playing else "paused"
+    return {"status": "success", "message": f"Video {action}"}
+
 @app.post("/api/upload/image")
 async def upload_image(file: UploadFile = File(...)):
     """
@@ -129,7 +273,7 @@ async def upload_image(file: UploadFile = File(...)):
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
+
         if img is None:
              return {"status": "error", "message": "Failed to decode image"}
 
@@ -147,7 +291,13 @@ async def upload_image(file: UploadFile = File(...)):
 
         # Update app state
         app_state["uploaded_image_path"] = file_path
+        app_state["input_mode"] = "image"
         app_state["rtsp_url"] = None  # Disable RTSP when using local image
+        app_state["video_file_path"] = None  # Disable video when using image
+        # Release video capture if exists
+        if app_state.get("video_capture"):
+            app_state["video_capture"].release()
+            app_state["video_capture"] = None
         app_state["prompt"] = None  # Clear existing prompts
         app_state["point_prompt"] = None
 

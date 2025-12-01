@@ -236,6 +236,9 @@ async def video_processing_loop(manager, app_state):
     video_capture = None
     frame_counter = 0
     
+    # Track active RTSP URL to detect changes
+    current_active_rtsp = None
+    
     # Reduce input size to save VRAM (Max dimension)
     MAX_INPUT_SIZE = 1024 
     
@@ -244,8 +247,14 @@ async def video_processing_loop(manager, app_state):
     last_payload = None
 
     while True:
+        # Get all state variables including video-related ones
+        input_mode = app_state.get("input_mode", "rtsp")
         rtsp_url = app_state.get("rtsp_url")
         uploaded_image_path = app_state.get("uploaded_image_path")
+        video_file_path = app_state.get("video_file_path")
+        video_playing = app_state.get("video_playing", True)
+        video_current_frame = app_state.get("video_current_frame", 0)
+        video_seek_request = app_state.get("video_seek_request")
         model = app_state.get("model")
         processor = app_state.get("processor")
         prompt = app_state.get("prompt")
@@ -255,28 +264,40 @@ async def video_processing_loop(manager, app_state):
         display_mode = app_state.get("display_mode", "segmentation")
         sound_enabled = app_state.get("sound_enabled")
         max_limit = app_state.get("max_limit")
-        
+
+        # RTSP State Management
+        # If URL changed or became empty, release resource
+        if rtsp_url != current_active_rtsp:
+            if video_capture and input_mode == "rtsp": # Only affect RTSP capture
+                 print(f"--- RTSP URL changed/cleared. Releasing capture. Old: {current_active_rtsp}, New: {rtsp_url} ---")
+                 video_capture.release()
+                 video_capture = None
+            current_active_rtsp = rtsp_url
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        
+
         # Generate State Hash (Tuple of all factors affecting output)
-        # For RTSP, we add frame_counter to force update. For Image, we don't.
+        # For RTSP and Video, we add frame info to force update. For Image, we don't.
         current_hash = (
-            uploaded_image_path, 
-            rtsp_url, 
-            prompt, 
+            input_mode,
+            uploaded_image_path,
+            rtsp_url,
+            video_file_path,
+            video_current_frame,
+            prompt,
             json.dumps(point_prompt) if point_prompt else None,
-            confidence, 
-            mask_thresh, 
+            confidence,
+            mask_thresh,
             display_mode,
             sound_enabled,
             max_limit
         )
-        
-        # RTSP always changes
-        is_rtsp = bool(rtsp_url)
+
+        # RTSP and Video always change
+        is_dynamic = input_mode in ["rtsp", "video"]
         
         # Check Cache (Only for Static Images)
-        if not is_rtsp and current_hash == last_state_hash and last_payload:
+        if not is_dynamic and current_hash == last_state_hash and last_payload:
             # Just broadcast the cached result to keep UI alive
             await manager.broadcast(json.dumps(last_payload))
             await asyncio.sleep(0.1)
@@ -284,20 +305,36 @@ async def video_processing_loop(manager, app_state):
 
         frame = None
         
-        # 1. Acquire Frame logic (same as before)
-        if uploaded_image_path and not rtsp_url:
+        # 1. Acquire Frame logic based on input mode
+        frame_metadata = {}
+
+        if input_mode == "image" and uploaded_image_path and not rtsp_url and not video_file_path:
             if video_capture: video_capture.release(); video_capture = None
             frame = cv2.imread(uploaded_image_path)
-            if frame is None: 
+            if frame is None:
                 await asyncio.sleep(1)
-                continue     
-        elif rtsp_url and not uploaded_image_path:
+                continue
+        elif input_mode == "rtsp" and rtsp_url and not uploaded_image_path and not video_file_path:
             if video_capture is None:
                 try:
-                    video_capture = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-                    if not video_capture.isOpened(): raise ValueError("Open failed")
-                    print("--- RTSP Connected ---")
-                except:
+                    # Support device index for local webcam (e.g., '0', '1', etc.)
+                    if rtsp_url.isdigit():
+                        device_index = int(rtsp_url)
+                        print(f"--- Opening local device {device_index} ---")
+                        video_capture = cv2.VideoCapture(device_index)
+                    else:
+                        # RTSP URL stream
+                        video_capture = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+
+                    if not video_capture.isOpened():
+                        raise ValueError(f"Failed to open: {rtsp_url}")
+
+                    if rtsp_url.isdigit():
+                        print(f"--- Local Device {device_index} Connected ---")
+                    else:
+                        print("--- RTSP Connected ---")
+                except Exception as e:
+                    print(f"Error opening video source: {e}")
                     video_capture = None
                     await asyncio.sleep(2)
                     continue
@@ -305,6 +342,54 @@ async def video_processing_loop(manager, app_state):
             if not ret:
                 video_capture.release(); video_capture = None
                 continue
+        elif input_mode == "video" and video_file_path and not rtsp_url and not uploaded_image_path:
+            # Initialize video capture if needed
+            if video_capture is None or not video_capture.isOpened():
+                video_capture = cv2.VideoCapture(video_file_path)
+                if not video_capture.isOpened():
+                    print(f"Failed to open video file: {video_file_path}")
+                    video_capture = None
+                    await asyncio.sleep(1)
+                    continue
+                total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+                fps = video_capture.get(cv2.CAP_PROP_FPS)
+                app_state["video_total_frames"] = total_frames
+                app_state["video_fps"] = fps
+                print(f"Video loaded: {total_frames} frames, {fps:.2f} FPS")
+
+            # Handle seek requests
+            if video_seek_request is not None:
+                video_capture.set(cv2.CAP_PROP_POS_FRAMES, video_seek_request)
+                app_state["video_current_frame"] = video_seek_request
+                app_state["video_seek_request"] = None
+
+            # Read frame based on playback state
+            if video_playing:
+                ret, frame = video_capture.read()
+                if not ret:
+                    # Loop video
+                    video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    app_state["video_current_frame"] = 0
+                    ret, frame = video_capture.read()
+                    if ret:
+                        app_state["video_current_frame"] = 1
+                else:
+                    app_state["video_current_frame"] += 1
+            else:
+                # Pause: get current frame
+                current_frame_pos = video_capture.get(cv2.CAP_PROP_POS_FRAMES)
+                ret, frame = video_capture.read()
+                # Reset position if we accidentally advanced
+                video_capture.set(cv2.CAP_PROP_POS_FRAMES, current_frame_pos)
+
+            # Add video metadata for WebSocket
+            frame_metadata = {
+                "input_mode": "video",
+                "video_current_frame": app_state["video_current_frame"],
+                "video_total_frames": app_state.get("video_total_frames", 0),
+                "video_fps": app_state.get("video_fps", 0),
+                "video_playing": video_playing
+            }
         else:
             await asyncio.sleep(0.5)
             continue
@@ -314,7 +399,7 @@ async def video_processing_loop(manager, app_state):
         count = 0
         
         should_process = (model and processor and (prompt or point_prompt))
-        if rtsp_url:
+        if input_mode in ["rtsp", "video"]:
              should_process = should_process and (frame_counter % 5 == 0)
 
         if should_process:
@@ -383,26 +468,39 @@ async def video_processing_loop(manager, app_state):
         _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         jpg_b64 = base64.b64encode(buffer).decode('utf-8')
         
+        # Merge analytics with any frame metadata
+        analytics = {
+            "input_mode": input_mode,
+            "detected_object": prompt if prompt else ("Selected Object" if point_prompt else "N/A"),
+            "count": count,
+            "max_limit": app_state["max_limit"],
+            "status": status,
+            "status_color": status_color,
+            "trigger_sound": (status == "Approved" and app_state["sound_enabled"])
+        }
+
+        # Add video metadata if available
+        if frame_metadata:
+            analytics.update(frame_metadata)
+
         payload = {
             "video_frame": f"data:image/jpeg;base64,{jpg_b64}",
-            "analytics": {
-                "detected_object": prompt if prompt else ("Selected Object" if point_prompt else "N/A"),
-                "count": count,
-                "max_limit": app_state["max_limit"],
-                "status": status,
-                "status_color": status_color,
-                "trigger_sound": (status == "Approved" and app_state["sound_enabled"])
-            }
+            "analytics": analytics
         }
-        
+
         # Update Cache
-        if not is_rtsp:
+        if not is_dynamic:
             last_state_hash = current_hash
             last_payload = payload
-        
+
         await manager.broadcast(json.dumps(payload))
-        
-        if rtsp_url:
+
+        # Adjust sleep based on input mode
+        if input_mode == "rtsp":
             await asyncio.sleep(0.01)
-        else:
+        elif input_mode == "video":
+            # Control playback speed based on video FPS if available
+            fps = app_state.get("video_fps", 30)
+            await asyncio.sleep(1.0 / fps)
+        else:  # image
             await asyncio.sleep(0.1)
