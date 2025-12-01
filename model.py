@@ -460,6 +460,10 @@ async def video_processing_loop(manager, app_state):
                     )
                     count = len(final_masks)
                     
+                    # SAVE STATE FOR EXPORT (Raw Masks & Frame)
+                    app_state["last_processed_frame"] = frame.copy()
+                    app_state["last_raw_masks"] = final_masks # These are refined but binary masks
+                    
                     # Draw on ORIGINAL frame
                     draw_masks(frame, final_masks)
                     

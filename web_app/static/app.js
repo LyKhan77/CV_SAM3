@@ -1149,6 +1149,51 @@ function closeHelpModal() {
     }, 300);
 }
 
+// --- 12. Export & Snapshot Functions ---
+async function saveAndviewResults() {
+    const container = document.getElementById('object-list-container');
+    const statusEl = document.getElementById('export-status');
+    
+    if (!container) return;
+    
+    // Show loading
+    container.innerHTML = '<div class="col-span-full flex justify-center py-4"><div class="loader"></div></div>';
+    
+    try {
+        const response = await postData("/api/snapshot/save", {});
+        console.log("Snapshot response:", response);
+        
+        if (response && response.status === 'success' && response.objects.length > 0) {
+            container.innerHTML = ''; // Clear loader
+            
+            response.objects.forEach(obj => {
+                const item = document.createElement('div');
+                item.className = 'bg-white p-2 rounded border border-gray-200 shadow-sm flex flex-col items-center gap-1 hover:border-primary transition-colors group';
+                item.innerHTML = `
+                    <div class="w-full aspect-square bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAHElEQVQYlWQQyQ0AAAyC7L/03YIqF8iJg3h5Dww0HwN7L8TjFAAAAABJRU5ErkJggg==')] bg-repeat rounded overflow-hidden flex items-center justify-center relative">
+                         <img src="${obj.thumbnail}" class="max-w-full max-h-full object-contain z-10">
+                         <div class="absolute top-1 left-1 bg-black/50 text-white text-[10px] px-1 rounded font-mono">#${obj.id}</div>
+                    </div>
+                    <span class="text-[10px] text-gray-500 font-medium truncate w-full text-center">object_${obj.id}.png</span>
+                `;
+                container.appendChild(item);
+            });
+            
+            if (statusEl) {
+                statusEl.classList.remove('hidden');
+                setTimeout(() => statusEl.classList.add('hidden'), 5000);
+            }
+            
+        } else {
+            container.innerHTML = '<div class="col-span-full text-center text-sm text-gray-500 py-4">No detected objects found to save.<br><span class="text-xs text-gray-400">Run detection first.</span></div>';
+        }
+        
+    } catch (error) {
+        console.error("Error saving snapshot:", error);
+        container.innerHTML = `<div class="col-span-full text-center text-xs text-red-500 py-2">Error: ${error.message}</div>`;
+    }
+}
+
 // Add global click listener for modal closing
 document.addEventListener('DOMContentLoaded', () => {
     const helpModal = document.getElementById('help-modal');

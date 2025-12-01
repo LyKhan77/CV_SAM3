@@ -45,6 +45,7 @@ login_helper.py
 pic/
 UI/
 prompt.md
+ObjectList/
 
 # Hugging Face
 .cache/

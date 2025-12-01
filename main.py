@@ -4,6 +4,8 @@ import os
 import shutil
 import cv2
 import numpy as np
+import base64
+import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import HTMLResponse
@@ -327,6 +329,87 @@ async def clear_uploaded_image():
 
     print("Uploaded image cleared")
     return {"status": "success", "message": "Local image cleared"}
+
+@app.post("/api/snapshot/save")
+async def save_snapshot():
+    """
+    Save current masks and crops to ObjectList/ folder.
+    Returns list of objects for UI.
+    """
+    frame = app_state.get("last_processed_frame")
+    masks = app_state.get("last_raw_masks")
+    
+    if frame is None or masks is None or len(masks) == 0:
+        return {"status": "error", "message": "No processed objects found to save."}
+        
+    # Setup Directory
+    output_dir = "ObjectList"
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    saved_objects = []
+    
+    try:
+        # Save Original Frame
+        cv2.imwrite(f"{output_dir}/original_frame.jpg", frame)
+        
+        for i, mask in enumerate(masks):
+            obj_id = i + 1
+            
+            # Ensure mask is correct size
+            if mask.shape[:2] != frame.shape[:2]:
+                mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
+            
+            # Create Transparent Crop
+            # 1. Create RGBA image
+            b, g, r = cv2.split(frame)
+            # Alpha channel is the mask itself (0 or 255)
+            alpha = (mask * 255).astype(np.uint8)
+            rgba = cv2.merge([b, g, r, alpha])
+            
+            # 2. Crop to Bounding Box
+            x, y, w, h = cv2.boundingRect(mask)
+            # Add slight padding if possible
+            pad = 5
+            h_img, w_img = frame.shape[:2]
+            x1 = max(0, x - pad)
+            y1 = max(0, y - pad)
+            x2 = min(w_img, x + w + pad)
+            y2 = min(h_img, y + h + pad)
+            
+            if w > 0 and h > 0:
+                crop_rgba = rgba[y1:y2, x1:x2]
+                filename = f"object_{obj_id}.png"
+                filepath = f"{output_dir}/{filename}"
+                cv2.imwrite(filepath, crop_rgba)
+                
+                # Prepare Base64 for UI
+                _, buffer = cv2.imencode('.png', crop_rgba)
+                b64_img = base64.b64encode(buffer).decode('utf-8')
+                
+                saved_objects.append({
+                    "id": obj_id,
+                    "bbox": [int(x), int(y), int(w), int(h)],
+                    "filename": filename,
+                    "thumbnail": f"data:image/png;base64,{b64_img}"
+                })
+                
+        # Save Metadata
+        with open(f"{output_dir}/data.json", "w") as f:
+            # Remove base64 from json file to save space
+            json_data = [{k: v for k, v in obj.items() if k != 'thumbnail'} for obj in saved_objects]
+            json.dump(json_data, f, indent=4)
+            
+        return {
+            "status": "success", 
+            "message": f"Saved {len(saved_objects)} objects to {output_dir}/",
+            "objects": saved_objects
+        }
+        
+    except Exception as e:
+        print(f"Error saving snapshot: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.websocket("/ws/monitor")
 async def websocket_endpoint(websocket: WebSocket):

@@ -254,8 +254,9 @@
     </header>
 
     <!-- ================= MAIN CONTENT ================= -->
-    <main class="flex-1 overflow-y-auto p-4 lg:p-6">
-        <div class="max-w-[1920px] mx-auto dashboard-grid h-full" style="min-height: calc(100vh - 8rem);">
+    <main class="flex-1 overflow-y-auto flex flex-col">
+        <div class="p-4 lg:p-6 pb-20 flex-1">
+            <div class="max-w-[1920px] mx-auto dashboard-grid h-full" style="min-height: calc(100vh - 12rem);">
 
             <!-- LEFT COLUMN (Main Container, Input Image, Prompt) -->
             <div class="left-column flex flex-col gap-6" style="min-height: calc(100vh - 8rem);">
@@ -473,6 +474,26 @@
                     </div>
                 </div>
 
+                <!-- Detected Objects Panel (Export) -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col gap-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-xl font-bold text-primary">Detected Objects</h3>
+                        <button onclick="saveAndviewResults()" class="bg-green-500 hover:bg-green-600 text-white font-bold px-4 py-2 rounded-lg text-xs transition-colors shadow-md flex items-center gap-2">
+                            <i class="fa-solid fa-floppy-disk"></i>
+                            Save & View
+                        </button>
+                    </div>
+                    
+                    <!-- List Container -->
+                    <div id="object-list-container" class="grid grid-cols-3 lg:grid-cols-4 gap-3 max-h-[300px] overflow-y-auto custom-scroll p-1 bg-gray-50 rounded-lg border border-gray-100 min-h-[100px] items-center justify-center text-gray-400">
+                        <p class="col-span-full text-center text-sm">No objects saved yet.</p>
+                    </div>
+                    
+                    <div id="export-status" class="text-xs text-center text-gray-400 hidden">
+                        Saved to <span class="font-mono bg-gray-100 px-1 rounded">ObjectList/</span>
+                    </div>
+                </div>
+
                 </div>
 
             </div> <!-- End of left column -->
@@ -587,6 +608,11 @@
 
             </div> <!-- End of right column -->
         </div>
+        
+        <!-- Footer -->
+        <footer class="mt-auto py-6 text-center text-gray-400 text-xs font-medium uppercase tracking-widest opacity-50 border-t border-gray-100">
+            &copy; GSPE
+        </footer>
     </main>
 
     <!-- Sound Effect (Hidden) -->
