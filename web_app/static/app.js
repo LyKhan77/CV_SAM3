@@ -1122,3 +1122,41 @@ async function stopRtspStreaming() {
     }
 }
 
+// --- 11. Help Modal Functions ---
+function openHelpModal() {
+    const modal = document.getElementById('help-modal');
+    const content = document.getElementById('help-modal-content');
+    if (!modal || !content) return;
+    
+    modal.classList.remove('hidden');
+    // Small delay to allow display:block to apply before opacity transition
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        content.classList.remove('scale-95');
+        content.classList.add('scale-100');
+    }, 10);
+}
+
+function closeHelpModal() {
+    const modal = document.getElementById('help-modal');
+    const content = document.getElementById('help-modal-content');
+    if (!modal || !content) return;
+
+    modal.classList.add('opacity-0');
+    content.classList.remove('scale-100');
+    content.classList.add('scale-95');
+    
+    setTimeout(() => {
+        modal.classList.add('hidden');
+    }, 300);
+}
+
+// Add global click listener for modal closing
+document.addEventListener('DOMContentLoaded', () => {
+    const helpModal = document.getElementById('help-modal');
+    if (helpModal) {
+        helpModal.addEventListener('click', (e) => {
+            if (e.target.id === 'help-modal') closeHelpModal();
+        });
+    }
+});

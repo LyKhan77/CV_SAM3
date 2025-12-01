@@ -415,7 +415,12 @@
 
                 <!-- Prompt Panel -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-                    <h3 class="text-xl font-bold text-primary mb-3">Prompt</h3>
+                    <div class="flex items-center gap-2 mb-3">
+                        <h3 class="text-xl font-bold text-primary">Prompt</h3>
+                        <button onclick="openHelpModal()" class="text-gray-400 hover:text-primary transition-colors text-sm" title="How to prompt?">
+                            <i class="fa-regular fa-circle-question"></i>
+                        </button>
+                    </div>
 
                     <!-- Smart Object Input with Dropdown -->
                     <div class="flex gap-3">
@@ -596,6 +601,85 @@
 
     <!-- Sound Effect (Hidden) -->
     <audio id="notification-sound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"></audio>
+
+    <!-- Help Modal -->
+    <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 z-[100] hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4 transform scale-95 transition-transform duration-300" id="help-modal-content">
+            <!-- Header -->
+            <div class="border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="bg-blue-100 p-2 rounded-lg text-primary">
+                        <i class="fa-solid fa-wand-magic-sparkles text-xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-800">How to Prompt SAM 3</h3>
+                </div>
+                <button onclick="closeHelpModal()" class="text-gray-400 hover:text-red-500 transition-colors">
+                    <i class="fa-solid fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- Body -->
+            <div class="p-6 overflow-y-auto max-h-[70vh]">
+                <div class="space-y-6">
+                    <!-- Section 1: Natural Language -->
+                    <div>
+                        <h4 class="text-lg font-semibold text-primary mb-2">1. Natural Language & Attributes</h4>
+                        <p class="text-gray-600 text-sm mb-3">SAM 3 understands detailed descriptions. Use color, shape, and context to be specific.</p>
+                        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <span class="text-xs font-bold text-green-600 uppercase">Good Examples</span>
+                                <ul class="list-disc list-inside text-sm text-gray-700 mt-1 space-y-1">
+                                    <li>"red car"</li>
+                                    <li>"person wearing white shirt"</li>
+                                    <li>"wooden chair next to the table"</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-red-500 uppercase">Too Vague</span>
+                                <ul class="list-disc list-inside text-sm text-gray-700 mt-1 space-y-1">
+                                    <li>"thing"</li>
+                                    <li>"object"</li>
+                                    <li>"stuff"</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Spatial Parts -->
+                    <div>
+                        <h4 class="text-lg font-semibold text-primary mb-2">2. Spatial & Parts</h4>
+                        <p class="text-gray-600 text-sm mb-3">You can target specific parts of an object or locations.</p>
+                        <div class="flex flex-wrap gap-2">
+                            <span class="px-3 py-1 bg-blue-50 text-blue-700 text-sm rounded-full border border-blue-100">"wheel of the car"</span>
+                            <span class="px-3 py-1 bg-blue-50 text-blue-700 text-sm rounded-full border border-blue-100">"handle of the mug"</span>
+                            <span class="px-3 py-1 bg-blue-50 text-blue-700 text-sm rounded-full border border-blue-100">"left shoe"</span>
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Point Prompting -->
+                    <div>
+                        <h4 class="text-lg font-semibold text-primary mb-2">3. Point Selection</h4>
+                        <div class="flex items-start gap-3">
+                            <div class="mt-1 text-primary">
+                                <i class="fa-solid fa-mouse-pointer"></i>
+                            </div>
+                            <p class="text-gray-600 text-sm">
+                                Enable the <strong>"Click to Select Object"</strong> toggle in the configuration panel. 
+                                Then, simply click on any object in the video feed to instantly segment it without typing a prompt.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex justify-end">
+                <button onclick="closeHelpModal()" class="bg-primary hover:bg-blue-800 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-md">
+                    Got it!
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- ================= BACKEND LOGIC MOCKUP ================= -->
     <script src="/static/app.js" defer></script>

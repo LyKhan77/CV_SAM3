@@ -44,22 +44,32 @@ def draw_masks(frame, masks, display_mode):
                 # Segmentation mode
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 if contours:
-                    cv2.drawContours(frame, contours, -1, color, 2)
+                    # SMOOTHING: Approximation
+                    smoothed_contours = []
+                    for cnt in contours:
+                        epsilon = 0.005 * cv2.arcLength(cnt, True) # 0.5% error margin
+                        approx = cv2.approxPolyDP(cnt, epsilon, True)
+                        smoothed_contours.append(approx)
+
+                    cv2.drawContours(frame, smoothed_contours, -1, color, 2) # Draw smooth lines
+                    
+                    # Overlay fill
                     overlay = frame.copy()
-                    cv2.drawContours(overlay, contours, -1, color, -1)
+                    cv2.drawContours(overlay, smoothed_contours, -1, color, -1)
                     cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
                     
                     # Calculate center for ID
-                    M = cv2.moments(contours[0])
-                    if M["m00"] != 0:
-                        cX = int(M["m10"] / M["m00"])
-                        cY = int(M["m01"] / M["m00"])
-                        # Draw ID
-                        label = f"#{i+1}"
-                        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                        cv2.rectangle(frame, (cX - tw//2 - 2, cY - th//2 - 2), (cX + tw//2 + 2, cY + th//2 + 2), (0,255,0), -1) # Green bg
-                        cv2.putText(frame, label, (cX - tw//2, cY + th//2), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+                    if len(smoothed_contours) > 0:
+                        M = cv2.moments(smoothed_contours[0])
+                        if M["m00"] != 0:
+                            cX = int(M["m10"] / M["m00"])
+                            cY = int(M["m01"] / M["m00"])
+                            # Draw ID
+                            label = f"#{i+1}"
+                            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                            cv2.rectangle(frame, (cX - tw//2 - 2, cY - th//2 - 2), (cX + tw//2 + 2, cY + th//2 + 2), (0,255,0), -1) # Green bg
+                            cv2.putText(frame, label, (cX - tw//2, cY + th//2), 
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
                     
         except Exception as e:
             print(f"[ERROR] Draw mask failed: {e}")
@@ -297,7 +307,17 @@ async def video_processing_loop(manager, app_state):
         is_dynamic = input_mode in ["rtsp", "video"]
         
         # Check Cache (Only for Static Images)
-        if not is_dynamic and current_hash == last_state_hash and last_payload:
+        # Force update if prompts are None but last payload had detections (Clearing state)
+        force_update = False
+        if not is_dynamic and last_payload:
+            last_analytics = last_payload.get("analytics", {})
+            was_detecting = last_analytics.get("detected_object") not in [None, "", "N/A"]
+            is_cleared = (prompt is None or prompt == "") and (point_prompt is None)
+            if was_detecting and is_cleared:
+                force_update = True
+                print("--- Force updating to clear mask ---")
+
+        if not is_dynamic and not force_update and current_hash == last_state_hash and last_payload:
             # Just broadcast the cached result to keep UI alive
             await manager.broadcast(json.dumps(last_payload))
             await asyncio.sleep(0.1)

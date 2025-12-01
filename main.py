@@ -105,8 +105,9 @@ async def set_stream_url(request: StreamRequest):
 
 @app.post("/api/config/prompt")
 async def set_prompt(request: PromptRequest):
-    app_state["prompt"] = request.object_name
-    app_state["point_prompt"] = None # Clear point prompt when text prompt is used
+    app_state["prompt"] = request.object_name if request.object_name.strip() else None
+    app_state["point_prompt"] = None # Clear point prompt when text prompt is used/cleared
+    print(f"Prompt updated: '{app_state['prompt']}' (Point prompt cleared)")
     return {"status": "success", "message": f"Prompt set to '{request.object_name}'"}
 
 @app.post("/api/config/limit")
@@ -313,12 +314,19 @@ async def clear_uploaded_image():
     """
     Clear the uploaded image and restore RTSP capability.
     """
+    current_path = app_state.get("uploaded_image_path")
+    
+    # Physically delete the file
+    if current_path and os.path.exists(current_path):
+        try:
+            os.remove(current_path)
+            print(f"Deleted file: {current_path}")
+        except Exception as e:
+            print(f"Error deleting file {current_path}: {e}")
+
     app_state["uploaded_image_path"] = None
     app_state["prompt"] = None
     app_state["point_prompt"] = None
-
-    # Optionally delete the uploaded file
-    # (Implement file cleanup if needed)
 
     print("Uploaded image cleared")
     return {"status": "success", "message": "Local image cleared"}
