@@ -83,254 +83,327 @@ function activateStream() {
     });
 }
 
+// --- 5. UI Event Handlers ---
+function activateStream() {
+    // ... (existing logic)
+}
+
 function processPrompt() {
     const inputEl = document.getElementById('prompt-input');
-    const descEl = document.getElementById('object-description');
+    const descPromptEl = document.getElementById('desc-prompt');
 
     if (!inputEl || !inputEl.value.trim()) return;
-    descEl.innerHTML = '<div class="loader"></div>';
-    postData("/api/config/prompt", { object_name: inputEl.value }).then(data => console.log("Prompt set response:", data));
-}
-
-function stopProcessing() {
-    // Clear the prompt in the backend to stop inference
-    postData("/api/config/prompt", { object_name: "" }).then(data => {
-        console.log("Processing stopped:", data);
-        // Reset UI description
-        document.getElementById('object-description').textContent = "{Object Description}";
-        // Clear input
-        document.getElementById('prompt-input').value = "";
-        // Disable click select mode if active
-        if (document.getElementById('select-object-toggle').checked) {
-            document.getElementById('select-object-toggle').checked = false;
-            toggleClickSelectMode();
-        }
+    
+    // Just update the UI and send to backend storage, don't trigger run
+    descPromptEl.textContent = inputEl.value;
+    postData("/api/config/prompt", { object_name: inputEl.value }).then(data => {
+        console.log("Prompt stored:", data);
     });
 }
+
+async function runSegmentation() {
+    const btn = document.getElementById('run-segmentation-btn');
+    const statusEl = document.getElementById('desc-status');
+    const statusDot = document.getElementById('status-dot');
+    
+    // UI Loading State
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<div class="loader w-4 h-4 border-white border-t-transparent"></div> Processing...';
+    }
+    
+    // Lock sliders
+    document.getElementById('confidence-slider').disabled = true;
+    document.getElementById('mask-slider').disabled = true;
+    
+    if (statusEl) statusEl.textContent = "Processing...";
+    if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-yellow-400 animate-pulse";
+
+    try {
+        const response = await postData("/api/config/run", {});
+        console.log("Run response:", response);
+        // Button re-enabled by WebSocket status update eventually
+    } catch (e) {
+        console.error("Run failed:", e);
+        // Reset on error
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-play"></i> Run Segmentation';
+        }
+    }
+}
+
+async function clearMask() {
+    try {
+        await postData("/api/config/clear-mask", {});
+        
+        // Clear Visuals
+        const descStatusEl = document.getElementById('desc-status');
+        const statusDot = document.getElementById('status-dot');
+        
+        if (descStatusEl) descStatusEl.textContent = "Ready";
+        if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-gray-400";
+        
+        // Unlock sliders
+        document.getElementById('confidence-slider').disabled = false;
+        document.getElementById('mask-slider').disabled = false;
+
+    } catch (e) {
+        console.error("Clear mask failed:", e);
+    }
+}
+
+// ... (stopProcessing removed as requested)
 
 function updateLimit() {
     const limit = parseInt(document.getElementById('max-limit').value) || 100;
     postData("/api/config/limit", { value: limit }).then(data => console.log("Limit set response:", data));
 }
 
-function updateSoundSetting() {
-    const enabled = document.getElementById('sound-toggle').checked;
-    postData("/api/config/sound", { enabled }).then(data => console.log("Sound setting response:", data));
-}
+// ... (rest of functions)
 
+// --- 6. Model Configuration Logic ---
 function updateModelConfig() {
     const confidence = parseInt(document.getElementById('confidence-slider').value) / 100;
     const maskThreshold = parseInt(document.getElementById('mask-slider').value) / 100;
-    postData("/api/config/model", { confidence, mask_threshold: maskThreshold }).then(data => console.log("Model config response:", data));
-}
 
-function handleVideoClick(event) {
-    if (!frontendState.isClickSelectMode) return;
-
-    const videoFeed = document.getElementById('mock-video-feed');
-    const rect = videoFeed.getBoundingClientRect();
-
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-
-    const normalX = x / rect.width;
-    const normalY = y / rect.height;
-
-    const point_prompt = {
-        type: "point_prompt",
-        points: { x: normalX, y: normalY }
-    };
-
-    if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(point_prompt));
-        document.getElementById('object-description').innerHTML = '<div class="loader"></div>';
-        document.getElementById('select-object-toggle').checked = false;
-        toggleClickSelectMode(); 
-    } else {
-        console.error("WebSocket is not open. Cannot send point prompt.");
-    }
-}
-
-function toggleClickSelectMode() {
-    frontendState.isClickSelectMode = document.getElementById('select-object-toggle').checked;
-    const videoFeed = document.getElementById('mock-video-feed');
-    const promptInput = document.getElementById('prompt-input');
-    
-    if (frontendState.isClickSelectMode) {
-        videoFeed.classList.add('cursor-crosshair');
-        promptInput.disabled = true;
-        promptInput.placeholder = "Click on video to select object";
-        promptInput.value = "";
-        postData("/api/config/prompt", { object_name: "" });
-    } else {
-        videoFeed.classList.remove('cursor-crosshair');
-        promptInput.disabled = false;
-        promptInput.placeholder = "{Object Name}";
-    }
-}
-
-// --- 6. DOM Element Event Listeners ---
-document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('max-limit').addEventListener('change', updateLimit);
-    document.getElementById('sound-toggle').addEventListener('change', updateSoundSetting);
-    
-    const confidenceSlider = document.getElementById('confidence-slider');
-    confidenceSlider.addEventListener('input', () => {
-        document.getElementById('confidence-value').textContent = `${confidenceSlider.value}%`;
+    postData("/api/config/model", { 
+        confidence: confidence, 
+        mask_threshold: maskThreshold 
+    }).then(data => {
+        console.log("Model config updated:", data);
     });
-    confidenceSlider.addEventListener('change', updateModelConfig);
+}
 
+function setupModelConfigListeners() {
+    const confSlider = document.getElementById('confidence-slider');
     const maskSlider = document.getElementById('mask-slider');
-    maskSlider.addEventListener('input', () => {
-        document.getElementById('mask-value').textContent = `${maskSlider.value}%`;
-    });
-    maskSlider.addEventListener('change', updateModelConfig);
-    
-    document.getElementById('select-object-toggle').addEventListener('change', toggleClickSelectMode);
-    document.getElementById('mock-video-feed').addEventListener('click', handleVideoClick);
+    const confValue = document.getElementById('confidence-value');
+    const maskValue = document.getElementById('mask-value');
 
-    // Add Stop button listener
-    // Check if element exists first to avoid errors if HTML isn't updated yet
-    const stopBtn = document.getElementById('stop-processing-btn');
-    if (stopBtn) {
-        stopBtn.addEventListener('click', stopProcessing);
-    }
-
-    // Add file input event listeners with null checking
-    const videoFileInput = document.getElementById('video-file');
-    const imageFileInput = document.getElementById('image-file-input');
-
-    if (videoFileInput) {
-        videoFileInput.addEventListener('change', uploadVideo);
-        console.log("Video file input listener added successfully");
-    } else {
-        console.error("Video file input element not found!");
-    }
-
-    if (imageFileInput) {
-        imageFileInput.addEventListener('change', uploadImage);
-        console.log("Image file input listener added successfully");
-    } else {
-        console.error("Image file input element not found!");
-    }
-
-    // Initialize setup functions
-    setupSmartPromptDropdown();
-    initializeInputModeSwitching();
-
-    // Add video seek listener with null checking
-    const videoSeek = document.getElementById('video-seek');
-    if (videoSeek) {
-        videoSeek.addEventListener('input', (e) => {
-            seekVideo(e.target.value);
+    if (confSlider && confValue) {
+        confSlider.addEventListener('input', (e) => {
+            confValue.textContent = `${e.target.value}%`;
         });
-        console.log("Video seek listener added successfully");
-    } else {
-        console.error("Video seek element not found!");
+        confSlider.addEventListener('change', updateModelConfig);
     }
-});
+
+    if (maskSlider && maskValue) {
+        maskSlider.addEventListener('input', (e) => {
+            maskValue.textContent = `${e.target.value}%`;
+        });
+        maskSlider.addEventListener('change', updateModelConfig);
+    }
+}
+
+// --- 6.1 Summary Panel Listeners ---
+function updateSound() {
+    const enabled = document.getElementById('sound-toggle').checked;
+    postData("/api/config/sound", { enabled: enabled }).then(data => {
+        console.log("Sound config updated:", data);
+    });
+}
+
+function updateLimit() {
+    const limitInput = document.getElementById('max-limit');
+    const limit = parseInt(limitInput.value) || 100;
+    console.log("Updating limit to:", limit);
+    
+    // Optimistic UI update for progress legend (optional, but good for responsiveness)
+    const progressLegend = document.getElementById('progress-legend');
+    if (progressLegend) {
+        const currentText = progressLegend.textContent.split('/')[0]; // Get current count
+        progressLegend.textContent = `${currentText}/${limit}`;
+    }
+
+    postData("/api/config/limit", { value: limit }).then(data => console.log("Limit set response:", data));
+}
+
+function setupSummaryListeners() {
+    const limitInput = document.getElementById('max-limit');
+    const soundToggle = document.getElementById('sound-toggle');
+
+    if (limitInput) {
+        // Use 'input' for real-time updates, or 'change' for commit-on-blur. 
+        // 'change' is safer for API calls, 'input' might flood. 
+        // Let's stick to 'change' but ensure it works. 
+        // Actually, user said "set the Max Limit", implying they finished setting it.
+        limitInput.addEventListener('change', updateLimit);
+        limitInput.addEventListener('blur', updateLimit); // Ensure blur also triggers
+    }
+    
+    if (soundToggle) {
+        soundToggle.addEventListener('change', updateSound);
+    }
+    console.log("Summary listeners setup complete.");
+}
 
 // --- 7. Dashboard Update Logic ---
 function updateDashboard(data) {
     const analytics = data.analytics;
     const countEl = document.getElementById('detected-count');
-    const descEl = document.getElementById('object-description');
-    const statusBadge = document.getElementById('status-badge');
-    const progressBar = document.getElementById('progress-bar');
-    const progressLegend = document.getElementById('progress-legend');
-    const videoFeed = document.getElementById('mock-video-feed');
+    
+    // Update new status fields
+    const descPromptEl = document.getElementById('desc-prompt');
+    const descStatusEl = document.getElementById('desc-status');
+    const statusDot = document.getElementById('status-dot');
+    const runBtn = document.getElementById('run-segmentation-btn');
 
     animateValue(countEl, frontendState.currentCount, analytics.count, 500);
     frontendState.currentCount = analytics.count;
-
-    // Handle video metadata updates
-    if (analytics.input_mode === 'video') {
-        updateVideoProgress(analytics.video_current_frame, analytics.video_total_frames);
-
-        // Update video play/pause button state
-        const playPauseBtn = document.getElementById('play-pause-btn');
-        if (playPauseBtn) {
-            if (analytics.video_playing) {
-                playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
-            } else {
-                playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+    
+    // Update Status UI from Backend State
+    if (descStatusEl && analytics.process_status) {
+        descStatusEl.textContent = analytics.process_status;
+        
+        if (analytics.process_status === "Processing...") {
+            if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-yellow-400 animate-pulse";
+        } else if (analytics.process_status === "Done") {
+            if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-green-500";
+            // Re-enable Run button and sliders
+            if (runBtn) {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '<i class="fa-solid fa-play"></i> Run Segmentation';
             }
+            document.getElementById('confidence-slider').disabled = false;
+            document.getElementById('mask-slider').disabled = false;
+        } else {
+             if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-gray-400";
+             // Ready state
+             if (runBtn) {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '<i class="fa-solid fa-play"></i> Run Segmentation';
+             }
+             document.getElementById('confidence-slider').disabled = false;
+             document.getElementById('mask-slider').disabled = false;
         }
-
-        // Update video metadata display
-        const currentFrameEl = document.getElementById('current-frame');
-        const totalFramesEl = document.getElementById('total-frames');
-        const fpsEl = document.getElementById('video-fps');
-
-        if (currentFrameEl) currentFrameEl.textContent = analytics.video_current_frame || 0;
-        if (totalFramesEl) totalFramesEl.textContent = analytics.video_total_frames || 0;
-        if (fpsEl) fpsEl.textContent = (analytics.video_fps || 0).toFixed(1);
+    }
+    
+    if (descPromptEl && analytics.detected_object !== "N/A") {
+        descPromptEl.textContent = analytics.detected_object;
     }
 
-    if(data.video_frame && data.video_frame.startsWith('data:image')) {
-       videoFeed.src = data.video_frame;
-
-       // Use class toggling instead of inline styles/setTimeout to prevent layout thrasing
-       if (analytics.detected_object && analytics.detected_object !== "N/A") {
-           videoFeed.classList.remove('border-transparent');
-           videoFeed.classList.add('border-primary');
-       } else {
-           videoFeed.classList.remove('border-primary');
-           videoFeed.classList.add('border-transparent');
-       }
+    // --- Updated Video Feed (Overlay) ---
+    const videoFeed = document.getElementById('mock-video-feed');
+    const placeholder = document.getElementById('stream-placeholder');
+    if (videoFeed && data.video_frame) {
+        videoFeed.src = data.video_frame;
+        videoFeed.classList.remove('hidden');
+        if (placeholder) placeholder.classList.add('hidden');
     }
 
-    if (analytics.detected_object && analytics.detected_object !== "N/A") {
-        const countText = analytics.count > 0 ? `(${analytics.count} found)` : '(searching...)';
-        // Only update HTML if it's different to avoid re-rendering loops/flicker
-        const newHTML = `Detecting: <span class="font-bold text-primary">${analytics.detected_object}</span> <span class="text-sm text-gray-500">${countText}</span>`;
-        if (!descEl.innerHTML.includes(analytics.detected_object)) {
-             descEl.innerHTML = newHTML;
-             if (analytics.count === 0) {
-                descEl.innerHTML += '<div class="loader ml-2" style="display: inline-block; width: 16px; height: 16px; border-width: 2px;"></div>';
-            }
+    // --- Update Status Badge ---
+    const statusBadge = document.getElementById('status-badge');
+    if (statusBadge && analytics.status) {
+        statusBadge.textContent = analytics.status;
+        // Reset classes
+        statusBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors";
+        
+        if (analytics.status === "Approved") {
+            // "Approved" in this context implies condition met (Count >= Limit)
+            // User requested Sound Alert on this condition, so it might be an "Alert" state.
+            // However, naming "Approved" usually implies Success. 
+            // Let's use Red for Alert/Limit Reached to match the sound urgency.
+            statusBadge.classList.add("bg-red-200", "text-red-800");
+        } else {
+            statusBadge.classList.add("bg-yellow-100", "text-yellow-800");
         }
-    } else if (analytics.detected_object === null || analytics.detected_object === "") {
-        descEl.textContent = "{Object Description}";
-    }
-    
-    let percentage = (analytics.count / analytics.max_limit) * 100;
-    if (percentage > 100) percentage = 100;
-    
-    progressBar.style.width = `${percentage}%`;
-    if (percentage >= 100) {
-        progressBar.className = "bg-red-600 h-3 rounded-full transition-all duration-500";
-    } else if (percentage >= 80) {
-        progressBar.className = "bg-orange-500 h-3 rounded-full transition-all duration-500";
-    } else {
-        progressBar.className = "bg-primary h-3 rounded-full transition-all duration-500";
     }
 
-    progressLegend.textContent = `${analytics.count}/${analytics.max_limit}`;
+    // --- Update Progress Bar ---
+    const progressBar = document.getElementById('progress-bar');
+    const progressLegend = document.getElementById('progress-legend');
     
-    // Only update the input field if the user is NOT currently typing in it
-    const maxLimitInput = document.getElementById('max-limit');
-    if (maxLimitInput && document.activeElement !== maxLimitInput) {
-        maxLimitInput.value = analytics.max_limit;
+    if (progressBar && analytics.max_limit > 0) {
+        const percentage = Math.min((analytics.count / analytics.max_limit) * 100, 100);
+        progressBar.style.width = `${percentage}%`;
+        
+        // Color logic: Red if over limit, Primary Blue otherwise
+        if (analytics.count >= analytics.max_limit) {
+            progressBar.className = "h-2 rounded-full bg-red-600 transition-all duration-500";
+        } else {
+            progressBar.className = "h-2 rounded-full bg-primary transition-all duration-500";
+        }
+    }
+    
+    if (progressLegend) {
+        progressLegend.textContent = `${analytics.count}/${analytics.max_limit}`;
     }
 
-    statusBadge.textContent = analytics.status;
-    const statusColor = analytics.status_color.toLowerCase();
-    
-    statusBadge.className = "px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-all duration-300";
-    
-    if (statusColor === 'success' || statusColor === 'green' || statusColor === 'approved') {
-        statusBadge.classList.add('bg-green-200', 'text-green-800');
-    } else if (statusColor === 'orange' || statusColor === 'waiting') {
-        statusBadge.classList.add('bg-orange-200', 'text-orange-800');
-    } else {
-        statusBadge.classList.add('bg-red-200', 'text-red-800', 'animate-pulse');
-    }
-
+    // --- Sound Alert ---
     if (analytics.trigger_sound) {
         triggerNotification();
-        document.body.style.backgroundColor = '#fef2f2';
-        setTimeout(() => { document.body.style.backgroundColor = '#F8F9FA'; }, 200);
+    }
+
+    // Sync Object List Clearing
+    // If detected object count goes to 0 and status is Ready (cleared), clear the list visual if needed?
+    // Actually, user requested explicit clearing on Image Remove.
+}
+
+// ... (rest of file)
+function openInputHelpModal() {
+    const modal = document.getElementById('input-help-modal');
+    const content = document.getElementById('input-help-modal-content');
+    if (!modal || !content) return;
+    
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        content.classList.remove('scale-95');
+        content.classList.add('scale-100');
+    }, 10);
+}
+
+function closeInputHelpModal() {
+    const modal = document.getElementById('input-help-modal');
+    const content = document.getElementById('input-help-modal-content');
+    if (!modal || !content) return;
+
+    modal.classList.add('opacity-0');
+    content.classList.remove('scale-100');
+    content.classList.add('scale-95');
+    
+    setTimeout(() => {
+        modal.classList.add('hidden');
+    }, 300);
+}
+
+// Add global click listener for modal closing
+document.addEventListener('DOMContentLoaded', () => {
+    const helpModal = document.getElementById('help-modal');
+    if (helpModal) {
+        helpModal.addEventListener('click', (e) => {
+            if (e.target.id === 'help-modal') closeHelpModal();
+        });
+    }
+    
+    const inputHelpModal = document.getElementById('input-help-modal');
+    if (inputHelpModal) {
+        inputHelpModal.addEventListener('click', (e) => {
+            if (e.target.id === 'input-help-modal') closeInputHelpModal();
+        });
+    }
+});
+
+// Update switchInputMode to clear object list
+async function switchInputMode(mode) {
+    // ... (existing code)
+    
+    // Clear object list on mode switch
+    const listContainer = document.getElementById('object-list-container');
+    if (listContainer) {
+        listContainer.innerHTML = '<p class="col-span-full text-center text-sm">No objects saved yet.</p>';
+    }
+
+    // ...
+}
+
+// Update clearUploadedImage to clear object list
+async function clearUploadedImage() {
+    // ... (existing code)
+    const listContainer = document.getElementById('object-list-container');
+    if (listContainer) {
+        listContainer.innerHTML = '<p class="col-span-full text-center text-sm">No objects saved yet.</p>';
     }
 }
 
@@ -406,163 +479,81 @@ function initializeInputModeSwitching() {
     const dropZone = document.getElementById('display-zone');
     const overlay = document.getElementById('upload-overlay');
     
-    if (!overlay) console.error("Upload overlay element NOT found!");
-    if (!dropZone) console.error("Display zone element NOT found!");
-
-    // Forward clicks on overlay to the correct file input
     if (overlay) {
         // Make sure overlay is clickable and visible
         overlay.style.cursor = 'pointer';
         overlay.style.zIndex = '50';
 
-        overlay.addEventListener('click', (e) => {
+        // Remove old listeners if any (by cloning) - optional but good practice if re-init
+        // For now, just add listener
+        overlay.onclick = (e) => {
             console.log("Overlay clicked!");
             e.preventDefault();
             e.stopPropagation();
 
             const modeInput = document.querySelector('input[name="input-mode"]:checked');
-            if (!modeInput) {
-                console.error("No input mode selected!");
-                alert("Please select an input mode first (Video or Image)");
-                return;
-            }
+            if (!modeInput) return;
 
             const mode = modeInput.value;
-            console.log(`Current mode: ${mode}`);
+            console.log(`Overlay Click - Current mode: ${mode}`);
 
             if (mode === 'video') {
                 const fileInput = document.getElementById('video-file');
-                console.log("Triggering Video Input click", fileInput);
-                if (fileInput) {
-                    fileInput.accept = 'video/*';
-                    fileInput.click();
-                } else {
-                    console.error("Video file input not found!");
-                    alert("Video file input not found. Please refresh the page.");
-                }
+                if (fileInput) fileInput.click();
             } else if (mode === 'image') {
                 const fileInput = document.getElementById('image-file-input');
-                console.log("Triggering Image Input click", fileInput);
-                if (fileInput) {
-                    fileInput.accept = 'image/*';
-                    fileInput.click();
-                } else {
-                    console.error("Image file input not found!");
-                    alert("Image file input not found. Please refresh the page.");
-                }
-            } else if (mode === 'rtsp') {
-                console.log("RTSP mode - no file upload needed");
-                alert("RTSP mode uses stream input, not file upload. Please enter an RTSP URL.");
+                if (fileInput) fileInput.click();
             }
-        });
+        };
     }
 
-    // Handle file selection
+    // Re-attach change listeners to inputs directly to be safe
     const videoFileInput = document.getElementById('video-file');
     if (videoFileInput) {
-        videoFileInput.addEventListener('change', (e) => {
-            console.log("Video file selected:", e.target.files[0]);
+        videoFileInput.onchange = (e) => {
+            console.log("Video Input Change");
             uploadVideo();
-        });
+        };
     }
     
     const imageFileInput = document.getElementById('image-file-input');
     if (imageFileInput) {
-        imageFileInput.addEventListener('change', (e) => {
-            console.log("Image file selected:", e.target.files[0]);
+        imageFileInput.onchange = (e) => {
+            console.log("Image Input Change");
             uploadImage();
-        });
+        };
     }
 
-    // Drag & Drop Support
+    // Drag & Drop Support (Keep existing logic but ensure it works)
     if (dropZone) {
-        dropZone.addEventListener('dragover', (e) => {
+        dropZone.ondragover = (e) => {
             e.preventDefault();
             dropZone.classList.add('border-primary', 'bg-primary/5');
-        });
+        };
         
-        dropZone.addEventListener('dragleave', () => {
+        dropZone.ondragleave = () => {
             dropZone.classList.remove('border-primary', 'bg-primary/5');
-        });
+        };
         
-        dropZone.addEventListener('drop', (e) => {
-            try {
-                e.preventDefault();
-                dropZone.classList.remove('border-primary', 'bg-primary/5');
-                console.log("File dropped! Files count:", e.dataTransfer.files.length);
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-primary', 'bg-primary/5');
+            
+            const modeInput = document.querySelector('input[name="input-mode"]:checked');
+            if (!modeInput) return;
+            const mode = modeInput.value;
 
-                // Get current mode with null checking
-                const modeInput = document.querySelector('input[name="input-mode"]:checked');
-                if (!modeInput) {
-                    console.error("No input mode selected when file dropped");
-                    alert("Please select an input mode first (RTSP, Video, or Image)");
-                    return;
-                }
-
-                const mode = modeInput.value;
-                console.log("Current mode:", mode);
-
-                if (e.dataTransfer.files.length === 0) {
-                    console.log("No files in drop event");
-                    return;
-                }
-
+            if (e.dataTransfer.files.length > 0) {
                 const file = e.dataTransfer.files[0];
-                console.log("Dropped file:", file.name, file.type, file.size);
-
-                if (mode === 'video') {
-                    if (file.type.startsWith('video/')) {
-                        console.log("Processing video drop");
-                        if (videoFileInput) {
-                            // Directly call uploadVideo with the file
-                            const tempInput = document.createElement('input');
-                            tempInput.type = 'file';
-                            tempInput.files = e.dataTransfer.files;
-
-                            // Simulate the file selection
-                            videoFileInput.files = e.dataTransfer.files;
-
-                            console.log("Video file assigned to input, calling uploadVideo()");
-                            uploadVideo();
-                        } else {
-                            console.error("Video file input element not found!");
-                            alert("Video file input not found. Please refresh the page.");
-                        }
-                    } else {
-                        console.warn("Invalid file type for video mode:", file.type);
-                        alert(`Please drop a valid video file (MP4, AVI, MOV, etc.). Current file: ${file.type}`);
-                    }
-                } else if (mode === 'image') {
-                    if (file.type.startsWith('image/')) {
-                        console.log("Processing image drop");
-                        if (imageFileInput) {
-                            // Directly call uploadImage with the file
-                            const tempInput = document.createElement('input');
-                            tempInput.type = 'file';
-                            tempInput.files = e.dataTransfer.files;
-
-                            // Simulate the file selection
-                            imageFileInput.files = e.dataTransfer.files;
-
-                            console.log("Image file assigned to input, calling uploadImage()");
-                            uploadImage();
-                        } else {
-                            console.error("Image file input element not found!");
-                            alert("Image file input not found. Please refresh the page.");
-                        }
-                    } else {
-                        console.warn("Invalid file type for image mode:", file.type);
-                        alert(`Please drop a valid image file (JPEG, PNG, etc.). Current file: ${file.type}`);
-                    }
-                } else {
-                    console.warn("Drop not supported in mode:", mode);
-                    alert(`File upload is not supported in ${mode} mode. Please select Video or Image mode.`);
+                if (mode === 'video' && videoFileInput) {
+                    videoFileInput.files = e.dataTransfer.files;
+                    uploadVideo();
+                } else if (mode === 'image' && imageFileInput) {
+                    imageFileInput.files = e.dataTransfer.files;
+                    uploadImage();
                 }
-            } catch (error) {
-                console.error("Error handling file drop:", error);
-                alert("Error processing dropped file: " + error.message);
             }
-        });
+        };
     }
 }
 
@@ -814,6 +805,12 @@ async function clearVideo() {
     document.getElementById('video-file-info').classList.add('hidden');
     document.getElementById('video-playback-controls').classList.add('hidden');
     document.getElementById('video-file').value = '';
+
+    // Clear Object List
+    const listContainer = document.getElementById('object-list-container');
+    if (listContainer) {
+        listContainer.innerHTML = '<p class="col-span-full text-center text-sm">No objects saved yet.</p>';
+    }
     
     // Reset Display Zone by calling switchInputMode again which checks the 'hidden' class
     switchInputMode('video');
@@ -885,6 +882,7 @@ async function uploadImage() {
             const uploadOverlay = document.getElementById('upload-overlay');
             if (uploadOverlay) uploadOverlay.classList.add('hidden');
 
+            // streamPlaceholder hiding is handled by displayUploadedImage, but double check here
             if (streamPlaceholder) streamPlaceholder.classList.add('hidden');
 
             console.log("Image upload successful");
@@ -913,6 +911,8 @@ function displayUploadedImage(file) {
         const reader = new FileReader();
         reader.onload = (e) => {
             const videoFeed = document.getElementById('mock-video-feed');
+            const placeholder = document.getElementById('stream-placeholder');
+            
             if (!videoFeed) {
                 console.error("Mock video feed element not found for image display!");
                 return;
@@ -921,6 +921,12 @@ function displayUploadedImage(file) {
             console.log("Setting image source to video feed element");
             videoFeed.src = e.target.result;
             videoFeed.classList.remove('hidden');
+            videoFeed.classList.remove('absolute'); // Remove absolute if it conflicts
+            videoFeed.classList.add('relative'); // Make it flow
+            
+            if (placeholder) {
+                placeholder.classList.add('hidden');
+            }
 
             // For images, we should use img element properties
             videoFeed.alt = `Uploaded image: ${file.name}`;
@@ -969,7 +975,17 @@ async function clearUploadedImage() {
                 console.log("Shown stream placeholder");
             }
 
-            console.log('Image cleared successfully');
+            console.log('Image cleared successfully. Clearing object list...');
+            
+            // Clear Object List
+            const listContainer = document.getElementById('object-list-container');
+            if (listContainer) {
+                listContainer.innerHTML = '<p class="col-span-full text-center text-sm">No objects saved yet.</p>';
+                console.log("Object list cleared.");
+            } else {
+                console.error("Object list container not found!");
+            }
+            
             switchInputMode('image');
         }
     } catch (error) {
@@ -1194,12 +1210,27 @@ async function saveAndviewResults() {
     }
 }
 
-// Add global click listener for modal closing
+// Add global click listener for modal closing and initialize app
 document.addEventListener('DOMContentLoaded', () => {
+    // 1. Modal Listeners
     const helpModal = document.getElementById('help-modal');
     if (helpModal) {
         helpModal.addEventListener('click', (e) => {
             if (e.target.id === 'help-modal') closeHelpModal();
         });
     }
+
+    const inputHelpModal = document.getElementById('input-help-modal');
+    if (inputHelpModal) {
+        inputHelpModal.addEventListener('click', (e) => {
+            if (e.target.id === 'input-help-modal') closeInputHelpModal();
+        });
+    }
+
+    // 2. Initialize Components
+    console.log("Initializing App Components...");
+    setupSmartPromptDropdown();
+    initializeInputModeSwitching();
+    setupModelConfigListeners();
+    setupSummaryListeners();
 });

@@ -294,12 +294,17 @@ async def upload_image(file: UploadFile = File(...)):
         app_state["input_mode"] = "image"
         app_state["rtsp_url"] = None  # Disable RTSP when using local image
         app_state["video_file_path"] = None  # Disable video when using image
+        
+        # Reset Segmentation State
+        app_state["should_segment"] = False
+        app_state["last_raw_masks"] = []
+        app_state["prompt"] = None
+        app_state["point_prompt"] = None
+        
         # Release video capture if exists
         if app_state.get("video_capture"):
             app_state["video_capture"].release()
             app_state["video_capture"] = None
-        app_state["prompt"] = None  # Clear existing prompts
-        app_state["point_prompt"] = None
 
         print(f"Image uploaded and processed successfully: {file.filename}")
         return {"status": "success", "message": f"Image uploaded: {file.filename}"}
@@ -330,10 +335,28 @@ async def clear_uploaded_image():
     print("Uploaded image cleared")
     return {"status": "success", "message": "Local image cleared"}
 
+@app.post("/api/config/run")
+async def run_segmentation():
+    """
+    Trigger segmentation process.
+    """
+    app_state["should_segment"] = True
+    return {"status": "success", "message": "Segmentation started"}
+
+@app.post("/api/config/clear-mask")
+async def clear_mask():
+    """
+    Stop segmentation and clear masks.
+    """
+    app_state["should_segment"] = False
+    app_state["last_raw_masks"] = []
+    # We don't clear last_processed_frame because we still want to show the image
+    return {"status": "success", "message": "Masks cleared"}
+
 @app.post("/api/snapshot/save")
 async def save_snapshot():
     """
-    Save current masks and crops to ObjectList/ folder.
+    Save current masks and crops to ObjectList/{filename}/ folder.
     Returns list of objects for UI.
     """
     frame = app_state.get("last_processed_frame")
@@ -342,8 +365,22 @@ async def save_snapshot():
     if frame is None or masks is None or len(masks) == 0:
         return {"status": "error", "message": "No processed objects found to save."}
         
-    # Setup Directory
-    output_dir = "ObjectList"
+    # Determine Folder Name based on input
+    input_name = "unknown_capture"
+    if app_state.get("uploaded_image_path"):
+        # Extract filename without extension
+        base = os.path.basename(app_state["uploaded_image_path"])
+        input_name = os.path.splitext(base)[0]
+    elif app_state.get("video_file_path"):
+        base = os.path.basename(app_state["video_file_path"])
+        input_name = os.path.splitext(base)[0]
+    elif app_state.get("rtsp_url"):
+        input_name = "rtsp_stream_capture"
+        
+    # Setup Directory: ObjectList/{input_name}
+    base_output_dir = "ObjectList"
+    output_dir = os.path.join(base_output_dir, input_name)
+    
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
@@ -361,15 +398,23 @@ async def save_snapshot():
             if mask.shape[:2] != frame.shape[:2]:
                 mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
             
-            # Create Transparent Crop
-            # 1. Create RGBA image
+            # Create Transparent Crop (FIXED LOGIC)
+            # 1. Create RGBA image (BGRA in OpenCV)
             b, g, r = cv2.split(frame)
-            # Alpha channel is the mask itself (0 or 255)
-            alpha = (mask * 255).astype(np.uint8)
-            rgba = cv2.merge([b, g, r, alpha])
+            
+            # Normalize mask to 0-255 uint8
+            # Mask from model might be binary 0/1 or 0/255. Ensure 255.
+            if mask.max() <= 1:
+                alpha = (mask * 255).astype(np.uint8)
+            else:
+                alpha = mask.astype(np.uint8)
+                
+            # Merge to create BGRA
+            bgra = cv2.merge([b, g, r, alpha])
             
             # 2. Crop to Bounding Box
-            x, y, w, h = cv2.boundingRect(mask)
+            x, y, w, h = cv2.boundingRect(alpha)
+            
             # Add slight padding if possible
             pad = 5
             h_img, w_img = frame.shape[:2]
@@ -379,13 +424,13 @@ async def save_snapshot():
             y2 = min(h_img, y + h + pad)
             
             if w > 0 and h > 0:
-                crop_rgba = rgba[y1:y2, x1:x2]
+                crop_bgra = bgra[y1:y2, x1:x2]
                 filename = f"object_{obj_id}.png"
                 filepath = f"{output_dir}/{filename}"
-                cv2.imwrite(filepath, crop_rgba)
+                cv2.imwrite(filepath, crop_bgra)
                 
                 # Prepare Base64 for UI
-                _, buffer = cv2.imencode('.png', crop_rgba)
+                _, buffer = cv2.imencode('.png', crop_bgra)
                 b64_img = base64.b64encode(buffer).decode('utf-8')
                 
                 saved_objects.append({

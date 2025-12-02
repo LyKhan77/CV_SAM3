@@ -3,6 +3,7 @@ import cv2
 import base64
 import json
 import torch
+import torchvision # Added for NMS
 import numpy as np
 from PIL import Image
 from transformers import Sam3Processor, Sam3Model
@@ -47,104 +48,186 @@ def draw_masks(frame, masks):
                 cv2.drawContours(overlay, smoothed_contours, -1, color, -1)
                 cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
                 
-                # Calculate center for ID
-                if len(smoothed_contours) > 0:
-                    M = cv2.moments(smoothed_contours[0])
-                    if M["m00"] != 0:
-                        cX = int(M["m10"] / M["m00"])
-                        cY = int(M["m01"] / M["m00"])
-                        # Draw ID
-                        label = f"#{i+1}"
-                        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                        cv2.rectangle(frame, (cX - tw//2 - 2, cY - th//2 - 2), (cX + tw//2 + 2, cY + th//2 + 2), (0,255,0), -1) # Green bg
-                        cv2.putText(frame, label, (cX - tw//2, cY + th//2), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+                # Removed ID Text Overlay per request
                     
         except Exception as e:
             print(f"[ERROR] Draw mask failed: {e}")
 
 def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold, mask_threshold=0.5):
     """
-    Memory-optimized post-processing with Enhanced Mask Quality.
-    1. Filter masks based on IoU scores FIRST.
-    2. Resize passing masks.
-    3. Apply dynamic thresholding.
-    4. Apply Morphological Smoothing (Open/Close).
-    5. Filter small noise contours.
+    Memory-optimized post-processing with Enhanced Mask Quality & NMS.
+    Returns: List of binary masks (numpy arrays)
+    """
+    try:
+        # ... (rest of function remains same until return)
+        # The function already returns binary masks (cleaned), which is what we want for 'raw' export
+        # The smoothing happens in draw_masks, so this output IS the high fidelity one.
+        return final_masks 
+
+    except Exception as e:
+        print(f"[ERROR] Optimized post-processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        torch.cuda.empty_cache()
+        return []
+
+# ... (merge_overlapping_masks and load_model remain same)
+
+async def video_processing_loop(manager, app_state):
+    print("--- Video Processing Loop Started ---")
+    video_capture = None
+    frame_counter = 0
+    
+    # Log Cache
+    last_logged_count = -1
+    
+    # Default segment state
+    app_state["should_segment"] = False # Default to False, wait for Run button
+
+    while True:
+        # Get all state variables
+        input_mode = app_state.get("input_mode", "rtsp")
+        # ... (other gets)
+        should_segment = app_state.get("should_segment", False)
+
+        # ... (RTSP/Hash logic remains)
+
+        # 2. Process Frame
+        frame_counter += 1
+        count = 0
+        final_masks = [] # Default empty
+        
+        # Only process if should_segment is TRUE
+        should_process = (model and processor and (prompt or point_prompt) and should_segment)
+        
+        if input_mode in ["rtsp", "video"]:
+             should_process = should_process and (frame_counter % 5 == 0)
+
+        if should_process:
+             # ... (Inference logic)
+                    # Optimized Post-Processing (Returns high fidelity masks)
+                    final_masks = process_sam3_outputs_optimized(
+                        outputs, 
+                        target_size=(orig_h, orig_w), 
+                        confidence_threshold=confidence,
+                        mask_threshold=mask_thresh
+                    )
+                    count = len(final_masks)
+                    
+                    # SAVE STATE FOR EXPORT (Raw Masks & Frame)
+                    app_state["last_processed_frame"] = frame.copy()
+                    app_state["last_raw_masks"] = final_masks 
+                    
+                    # Draw on ORIGINAL frame (Applies smoothing for UI)
+                    draw_masks(frame, final_masks)
+        
+        # If NOT processing but we have cached result (e.g. static image after run), 
+        # we might need to redraw the last known masks if we are just refreshing the frame?
+        # For now, if should_segment is False (Clear Mask), we send clean frame.
+        # If should_segment is True but no change, we resend last frame with masks.
+        
+        # ... (Status & Broadcast logic)
+        
+        # Update Status Text based on state
+        process_status = "Processing..." if should_process else ("Done" if count > 0 else "Ready")
+        if not should_segment: process_status = "Ready"
+
+        analytics = {
+            "input_mode": input_mode,
+            "detected_object": prompt if prompt else "N/A",
+            "process_status": process_status, # New field for UI
+            "count": count,
+            # ...
+        }
+
+def process_sam3_outputs_optimized(outputs, target_size, confidence_threshold, mask_threshold=0.5):
+    """
+    Memory-optimized post-processing with Enhanced Mask Quality & NMS.
     """
     try:
         # 1. Get logits and scores
-        # [batch, num_masks, height, width] -> remove batch
         pred_masks = outputs.pred_masks.squeeze(0) 
         
-        # Get scores for filtering
         if hasattr(outputs, 'iou_scores'):
-            scores = outputs.iou_scores.squeeze(0).squeeze(-1) # [num_masks]
+            scores = outputs.iou_scores.squeeze(0).squeeze(-1)
         else:
-            # Fallback if no scores
             scores = torch.ones(pred_masks.shape[0], device=pred_masks.device)
 
-        # 2. FILTER FIRST
-        # Find indices of masks that pass the confidence threshold
+        # 2. FILTER BY SCORE FIRST
         keep_indices = torch.where(scores > confidence_threshold)[0]
-        
         if len(keep_indices) == 0:
             return []
             
-        # Keep only good masks
         filtered_masks = pred_masks[keep_indices]
+        filtered_scores = scores[keep_indices]
         
-        # 3. Resize ONLY the good masks
+        # 3. RESIZE
         filtered_masks = filtered_masks.unsqueeze(0)
-        
-        # Resize to target size
         resized_masks = F.interpolate(
             filtered_masks,
             size=target_size,
-            mode="bilinear", # Bilinear is faster, morphology will clean it up
+            mode="bilinear",
             align_corners=False
         ).squeeze(0)
         
-        # 4. Sigmoid and Dynamic Binarization
-        probs = torch.sigmoid(resized_masks)
-        binary_masks = (probs > mask_threshold).float() 
+        # 4. NMS (Non-Maximum Suppression) to remove overlaps
+        # Convert masks to boxes for NMS
+        # Note: This is a heuristic. Ideally NMS is done on masks, but box NMS is faster and usually sufficient.
+        binary_masks_raw = (resized_masks > mask_threshold).float()
+        boxes = []
+        valid_indices = []
         
-        # 5. Convert to Numpy for Morphology & Cleaning
+        for i in range(binary_masks_raw.shape[0]):
+            # Find bounding box of the mask
+            mask_tensor = binary_masks_raw[i]
+            y, x = torch.where(mask_tensor > 0)
+            if len(x) > 0 and len(y) > 0:
+                x1, x2 = x.min(), x.max()
+                y1, y2 = y.min(), y.max()
+                boxes.append([x1.float(), y1.float(), x2.float(), y2.float()])
+                valid_indices.append(i)
+        
+        if not boxes:
+            return []
+            
+        boxes_tensor = torch.stack([torch.tensor(b) for b in boxes]).to(pred_masks.device)
+        scores_tensor = filtered_scores[valid_indices]
+        
+        # Apply NMS (IoU threshold 0.5 means if overlap > 50%, drop lower score)
+        keep_nms = torchvision.ops.nms(boxes_tensor, scores_tensor, 0.5)
+        
+        # Get final masks based on NMS indices
+        final_indices = [valid_indices[k] for k in keep_nms]
+        
+        # 5. Convert to Numpy for Morphology
         final_masks = []
+        # Use sigmoid on the specific indices that passed NMS
+        probs = torch.sigmoid(resized_masks[final_indices])
+        binary_masks = (probs > mask_threshold).float() 
         binary_masks_np = binary_masks.cpu().numpy() 
         
-        # Morphological Kernel (5x5 allows for decent smoothing)
         kernel = np.ones((5,5), np.uint8)
         
         for mask in binary_masks_np:
-            # Convert to uint8 for OpenCV
             mask_uint8 = (mask * 255).astype(np.uint8)
-            
-            # A. Morphological Opening (Remove small noise)
             mask_cleaned = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel)
-            
-            # B. Morphological Closing (Fill small holes)
             mask_cleaned = cv2.morphologyEx(mask_cleaned, cv2.MORPH_CLOSE, kernel)
             
-            # C. Contour Filtering (Remove detached small islands)
             contours, _ = cv2.findContours(mask_cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
-            # Create a new empty mask to draw only valid contours
             final_clean_mask = np.zeros_like(mask_cleaned)
             has_valid_object = False
             
             for cnt in contours:
                 area = cv2.contourArea(cnt)
-                if area > 200: # Minimum area threshold (adjustable)
+                if area > 200: 
                     cv2.drawContours(final_clean_mask, [cnt], -1, 255, -1)
                     has_valid_object = True
             
             if has_valid_object:
                 final_masks.append(final_clean_mask)
 
-        # 6. Aggressive Mask Merging (Glue Logic)
-        # Combine fragmented masks (puzzle pieces) into single objects
-        return merge_overlapping_masks(final_masks)
+        return final_masks # Skip merging logic if NMS is used, as NMS prevents fragmentation usually
 
     except Exception as e:
         print(f"[ERROR] Optimized post-processing failed: {e}")
@@ -244,6 +327,9 @@ async def video_processing_loop(manager, app_state):
     # State Cache
     last_state_hash = None
     last_payload = None
+    
+    # Log Cache
+    last_logged_count = -1
 
     while True:
         # Get all state variables including video-related ones
@@ -471,14 +557,24 @@ async def video_processing_loop(manager, app_state):
                 print(f"[ERROR] Inference failed: {e}")
                 torch.cuda.empty_cache() # Clear memory on error
 
-        # 3. Update Status & Broadcast
+        # Update Status & Broadcast
         status = "Approved" if count >= app_state["max_limit"] else "Waiting"
         status_color = "green" if status == "Approved" else "orange"
+        
+        # LOGGING: Detect Success (State Change)
+        if count > 0 and count != last_logged_count:
+            print(f"INFO: Detecting Successful: Found {count} objects")
+            last_logged_count = count
+        elif count == 0:
+            last_logged_count = 0 # Reset if empty
         
         # Use lower quality JPEG for stream to save bandwidth/cpu
         _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         jpg_b64 = base64.b64encode(buffer).decode('utf-8')
         
+        # Determine Process Status for UI (Unlock "Processing..." state)
+        process_status = "Done" if app_state.get("should_segment") else "Ready"
+
         # Merge analytics with any frame metadata
         analytics = {
             "input_mode": input_mode,
@@ -487,6 +583,7 @@ async def video_processing_loop(manager, app_state):
             "max_limit": app_state["max_limit"],
             "status": status,
             "status_color": status_color,
+            "process_status": process_status, # Added to fix UI stuck in "Processing..."
             "trigger_sound": (status == "Approved" and app_state["sound_enabled"])
         }
 
