@@ -498,6 +498,24 @@ function updateDashboard(data) {
          if (videoSeek && !document.activeElement.isEqualNode(videoSeek)) {
              updateVideoProgress(analytics.video_current_frame, analytics.video_total_frames);
          }
+
+         // Update FPS display
+         const videoFpsDisplay = document.getElementById('video-fps');
+         if (videoFpsDisplay && analytics.video_fps) {
+             videoFpsDisplay.textContent = `${analytics.video_fps.toFixed(1)} FPS`;
+         }
+
+         // Sync play/pause button state
+         const playPauseIcon = document.getElementById('play-pause-icon');
+         const playPauseText = document.getElementById('play-pause-text');
+         if (analytics.video_playing !== undefined) {
+             if (playPauseIcon) {
+                 playPauseIcon.className = analytics.video_playing ? 'fa-solid fa-pause' : 'fa-solid fa-play';
+             }
+             if (playPauseText) {
+                 playPauseText.textContent = analytics.video_playing ? 'Pause' : 'Play';
+             }
+         }
     }
 
     // 6. Sound Trigger
@@ -733,6 +751,18 @@ async function switchInputMode(mode) {
     document.getElementById('video-panel').classList.add('hidden');
     document.getElementById('image-panel').classList.add('hidden');
 
+    // Hide video-specific controls when leaving video mode
+    const videoPlaybackControls = document.getElementById('video-playback-controls');
+    const videoFileInfo = document.getElementById('video-file-info');
+    if (videoPlaybackControls) videoPlaybackControls.classList.add('hidden');
+    if (videoFileInfo) videoFileInfo.classList.add('hidden');
+
+    // Clear prompts UI when switching modes
+    const promptInput = document.getElementById('prompt-input');
+    const descPrompt = document.getElementById('desc-prompt');
+    if (promptInput) promptInput.value = '';
+    if (descPrompt) descPrompt.textContent = 'Click "Run Mask" to start';
+
     // 2. Show Selected Control Panel
     const targetPanel = document.getElementById(`${mode}-panel`);
     if (targetPanel) targetPanel.classList.remove('hidden');
@@ -766,18 +796,17 @@ async function switchInputMode(mode) {
         const infoPanel = document.getElementById('video-file-info');
         const isInfoHidden = infoPanel && infoPanel.classList.contains('hidden');
         console.log(`Video mode: Info hidden? ${isInfoHidden}`);
-        
+
         if (isInfoHidden) {
              if (overlay) overlay.classList.add('hidden'); // Hide overlay so button is clickable
              placeholderHtml.classList.remove('hidden');
              if (streamFeed) streamFeed.classList.add('hidden');
-             // Re-enable overlay for drag/drop on the container background if needed, 
-             // but for now, let's rely on the button and the drop zone event listeners.
-             // To make the whole area clickable again without blocking the button, we'd need complex layering.
-             // The user specifically asked for the button.
         } else {
-             // File already loaded, show feed
+             // File already loaded, show feed and controls
              if (overlay) overlay.classList.add('hidden');
+             // Show video controls if video is loaded
+             if (videoFileInfo) videoFileInfo.classList.remove('hidden');
+             if (videoPlaybackControls) videoPlaybackControls.classList.remove('hidden');
         }
     } 
     else if (mode === 'image') {
@@ -966,22 +995,40 @@ async function uploadVideo() {
 }
 
 async function clearVideo() {
-    // Reset backend
-    await switchInputMode('video'); 
-    
-    // Reset UI
-    document.getElementById('video-file-info').classList.add('hidden');
-    document.getElementById('video-playback-controls').classList.add('hidden');
-    document.getElementById('video-file').value = '';
+    try {
+        const response = await postData('/api/config/video/clear', {});
 
-    // Clear Object List
-    const listContainer = document.getElementById('object-list-container');
-    if (listContainer) {
-        listContainer.innerHTML = '<p class="col-span-full text-center text-sm">No objects saved yet.</p>';
+        if (response && response.status === 'success') {
+            // Hide video controls if they exist
+            const videoPlaybackControls = document.getElementById('video-playback-controls');
+            if (videoPlaybackControls) {
+                videoPlaybackControls.classList.add('hidden');
+            }
+
+            // Clear video file input
+            const videoFileInput = document.getElementById('video-file');
+            if (videoFileInput) {
+                videoFileInput.value = '';
+            }
+
+            // Hide video file info
+            const videoFileInfo = document.getElementById('video-file-info');
+            if (videoFileInfo) {
+                videoFileInfo.classList.add('hidden');
+            }
+
+            // Clear Object List
+            const listContainer = document.getElementById('object-list-container');
+            if (listContainer) {
+                listContainer.innerHTML = '<p class="col-span-full text-center text-sm">No objects saved yet.</p>';
+            }
+
+            showToast('Video cleared', 'success');
+        }
+    } catch (error) {
+        console.error('Error clearing video:', error);
+        showToast('Failed to clear video', 'error');
     }
-    
-    // Reset Display Zone by calling switchInputMode again which checks the 'hidden' class
-    switchInputMode('video');
 }
 
 async function uploadImage() {
@@ -1193,9 +1240,13 @@ function updateVideoProgress(currentFrame, totalFrames) {
     const videoSeek = document.getElementById('video-seek');
     const frameCounter = document.getElementById('frame-counter');
 
-    if (videoSeek && frameCounter) {
+    if (videoSeek && totalFrames > 0) {
+        videoSeek.max = totalFrames;
         videoSeek.value = currentFrame || 0;
-        frameCounter.textContent = `${currentFrame || 0}/${totalFrames || 0}`;
+    }
+
+    if (frameCounter) {
+        frameCounter.textContent = `${currentFrame || 0} / ${totalFrames || 0}`;
     }
 }
 
@@ -1213,29 +1264,29 @@ async function toggleVideoPlayback() {
     try {
         console.log("toggleVideoPlayback() function called");
 
-        const playPauseBtn = document.getElementById('play-pause-btn');
-        if (!playPauseBtn) {
-            console.error("Play/pause button not found");
-            return;
-        }
+        const response = await postData('/api/config/video/toggle', {});
 
-        const currentState = !playPauseBtn.innerHTML.includes('fa-play');
-        console.log("Current video state:", currentState ? "playing" : "paused");
-
-        const response = await postData("/api/config/video/play-pause", { playing: !currentState });
-        console.log("Video playback toggle response:", response);
-
-        // Update button icon immediately for better UX
         if (response && response.status === 'success') {
-            const isPlaying = response.data && response.data.playing;
-            console.log("New playing state:", isPlaying);
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            const playPauseIcon = document.getElementById('play-pause-icon');
+            const playPauseText = document.getElementById('play-pause-text');
 
-            playPauseBtn.innerHTML = isPlaying ?
-                '<i class="fa-solid fa-pause"></i>' :
-                '<i class="fa-solid fa-play"></i>';
+            // Update UI based on current state
+            if (response.video_playing) {
+                if (playPauseIcon) playPauseIcon.className = 'fa-solid fa-pause';
+                if (playPauseText) playPauseText.textContent = 'Pause';
+                console.log("Video playing");
+            } else {
+                if (playPauseIcon) playPauseIcon.className = 'fa-solid fa-play';
+                if (playPauseText) playPauseText.textContent = 'Play';
+                console.log("Video paused");
+            }
+
+            showToast(`Video ${response.video_playing ? 'playing' : 'paused'}`, 'info');
         }
     } catch (error) {
-        console.error("Error toggling video playback:", error);
+        console.error('Error toggling video playback:', error);
+        showToast('Failed to toggle playback', 'error');
     }
 }
 

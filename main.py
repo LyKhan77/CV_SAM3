@@ -234,11 +234,12 @@ async def upload_video(file: UploadFile = File(...)):
         total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = video_capture.get(cv2.CAP_PROP_FPS)
 
-        # Release test capture
-        video_capture.release()
-
         if total_frames <= 0:
+            video_capture.release()  # Only release on error
             return {"status": "error", "message": "Invalid video file - no frames found"}
+
+        # DON'T release immediately - store for processing loop to reuse
+        # video_capture.release()  # REMOVED
 
         # Update app state
         app_state["video_file_path"] = file_path
@@ -248,6 +249,7 @@ async def upload_video(file: UploadFile = File(...)):
         app_state["video_playing"] = True
         app_state["video_seek_request"] = None
         app_state["input_mode"] = "video"
+        app_state["video_capture"] = video_capture  # Store reference for reuse
 
         # Clear other input modes
         app_state["rtsp_url"] = None

@@ -46,6 +46,11 @@ pic/
 UI/
 prompt.md
 ObjectList/
+plan/
+
+test_official_processor.py
+
+test_import.py
 
 # Hugging Face
 .cache/

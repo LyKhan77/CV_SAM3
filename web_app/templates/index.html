@@ -420,6 +420,36 @@
                                 <span id="video-filename" class="text-sm text-gray-600 truncate max-w-[200px]">-</span>
                                 <button onclick="clearVideo()" class="text-red-500 hover:text-red-700"><i class="fa-solid fa-times"></i></button>
                             </div>
+
+                            <!-- Video Playback Controls -->
+                            <div id="video-playback-controls" class="hidden mt-3 p-3 border border-gray-200 rounded bg-white">
+                                <!-- Play/Pause Button -->
+                                <div class="flex items-center gap-3 mb-3">
+                                    <button id="play-pause-btn" onclick="toggleVideoPlayback()"
+                                            class="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors">
+                                        <i id="play-pause-icon" class="fa-solid fa-play"></i>
+                                        <span id="play-pause-text">Play</span>
+                                    </button>
+
+                                    <!-- Frame Counter -->
+                                    <span id="frame-counter" class="text-sm text-gray-600">
+                                        0 / 0
+                                    </span>
+
+                                    <!-- FPS Display -->
+                                    <span id="video-fps" class="text-sm text-gray-500">
+                                        0 FPS
+                                    </span>
+                                </div>
+
+                                <!-- Seek Slider -->
+                                <div class="flex items-center gap-3">
+                                    <label class="text-sm text-gray-600 min-w-[40px]">Seek:</label>
+                                    <input type="range" id="video-seek" min="0" max="100" value="0"
+                                           onchange="seekVideo(this.value)"
+                                           class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                </div>
+                            </div>
                         </div>
                         <div id="image-panel" class="input-panel hidden">
                             <div id="image-file-info" class="hidden flex justify-between items-center border border-gray-200 rounded p-2 bg-gray-50">

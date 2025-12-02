@@ -317,19 +317,23 @@ async def video_processing_loop(manager, app_state):
     print("--- Video Processing Loop Started ---")
     video_capture = None
     frame_counter = 0
-    
+
     # Track active RTSP URL to detect changes
     current_active_rtsp = None
-    
+
     # Reduce input size to save VRAM (Max dimension)
-    MAX_INPUT_SIZE = 1024 
-    
+    MAX_INPUT_SIZE = 1024
+
     # State Cache
     last_state_hash = None
     last_payload = None
-    
+
     # Log Cache
     last_logged_count = -1
+
+    # Video open retry tracking
+    video_open_retry_count = 0
+    MAX_VIDEO_OPEN_RETRIES = 3
 
     while True:
         # Get all state variables including video-related ones
@@ -458,12 +462,39 @@ async def video_processing_loop(manager, app_state):
         elif input_mode == "video" and video_file_path and not rtsp_url and not uploaded_image_path:
             # Initialize video capture if needed
             if video_capture is None or not video_capture.isOpened():
-                video_capture = cv2.VideoCapture(video_file_path)
+                # Check if already opened during upload
+                existing_capture = app_state.get("video_capture")
+                if existing_capture and existing_capture.isOpened():
+                    video_capture = existing_capture
+                    print("Reusing existing VideoCapture from upload")
+                else:
+                    video_capture = cv2.VideoCapture(video_file_path)
                 if not video_capture.isOpened():
-                    print(f"Failed to open video file: {video_file_path}")
+                    video_open_retry_count += 1
+                    print(f"Failed to open video file: {video_file_path} (attempt {video_open_retry_count}/{MAX_VIDEO_OPEN_RETRIES})")
+
+                    if video_open_retry_count >= MAX_VIDEO_OPEN_RETRIES:
+                        # Send error notification to frontend via WebSocket
+                        error_payload = {
+                            "status": "error",
+                            "message": f"Failed to open video after {MAX_VIDEO_OPEN_RETRIES} attempts",
+                            "video_frame": None,
+                            "analytics": {
+                                "input_mode": "video",
+                                "error": f"Video file inaccessible: {video_file_path}"
+                            }
+                        }
+                        await manager.broadcast(json.dumps(error_payload))
+                        video_open_retry_count = 0  # Reset counter
+                        await asyncio.sleep(5)  # Wait longer before next attempt
+                    else:
+                        await asyncio.sleep(1)
+
                     video_capture = None
-                    await asyncio.sleep(1)
                     continue
+                else:
+                    video_open_retry_count = 0  # Reset on success
+
                 total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
                 fps = video_capture.get(cv2.CAP_PROP_FPS)
                 app_state["video_total_frames"] = total_frames
@@ -485,7 +516,7 @@ async def video_processing_loop(manager, app_state):
                     app_state["video_current_frame"] = 0
                     ret, frame = video_capture.read()
                     if ret:
-                        app_state["video_current_frame"] = 1
+                        app_state["video_current_frame"] = 0  # Fixed: Was 1, now 0
                 else:
                     app_state["video_current_frame"] += 1
             else:
@@ -542,13 +573,18 @@ async def video_processing_loop(manager, app_state):
                     ).to(device)
                 
                 elif point_prompt:
-                    # Adjust point coords to resized image
+                    # Use ORIGINAL frame size for coordinate calculation
+                    abs_x = int(point_prompt["x"] * orig_w)
+                    abs_y = int(point_prompt["y"] * orig_h)
+
+                    # Scale to resized image coordinates
                     curr_w, curr_h = image_pil.size
-                    abs_x = int(point_prompt["x"] * curr_w)
-                    abs_y = int(point_prompt["y"] * curr_h)
+                    scaled_x = int(abs_x * (curr_w / orig_w))
+                    scaled_y = int(abs_y * (curr_h / orig_h))
+
                     inputs = processor(
                         images=image_pil,
-                        input_points=[[[abs_x, abs_y]]],
+                        input_points=[[[scaled_x, scaled_y]]],
                         return_tensors="pt"
                     ).to(device)
 
@@ -665,6 +701,11 @@ async def video_processing_loop(manager, app_state):
         elif input_mode == "video":
             # Control playback speed based on video FPS if available
             fps = app_state.get("video_fps", 30)
+
+            # Validate FPS value to prevent division by zero or invalid sleep
+            if fps <= 0 or fps > 240:  # Reasonable FPS range: 1-240
+                fps = 30  # Fallback to default
+
             await asyncio.sleep(1.0 / fps)
         else:  # image
             await asyncio.sleep(0.1)
