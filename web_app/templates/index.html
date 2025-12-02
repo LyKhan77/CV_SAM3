@@ -298,7 +298,12 @@
 
                     <!-- Model Configuration Panel -->
                     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-                        <h3 class="text-xl font-bold text-primary mb-4">Model Config</h3>
+                        <div class="flex items-center gap-2 mb-4">
+                            <h3 class="text-xl font-bold text-primary">Model Config</h3>
+                            <button onclick="openModelHelpModal()" class="text-gray-400 hover:text-primary transition-colors text-sm" title="Configuration Guide">
+                                <i class="fa-regular fa-circle-question"></i>
+                            </button>
+                        </div>
                         <div class="space-y-6">
                             
                             <!-- Confidence -->
@@ -627,6 +632,90 @@
                     Understood
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Model Config Help Modal -->
+    <div id="model-help-modal" class="fixed inset-0 bg-black bg-opacity-50 z-[100] hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 transform scale-95 transition-transform duration-300" id="model-help-modal-content">
+            <!-- Header -->
+            <div class="border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="bg-green-100 p-2 rounded-lg text-green-600">
+                        <i class="fa-solid fa-sliders text-xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-800">Configuration Guide</h3>
+                </div>
+                <button onclick="closeModelHelpModal()" class="text-gray-400 hover:text-red-500 transition-colors">
+                    <i class="fa-solid fa-xmark text-2xl"></i>
+                </button>
+            </div>
+
+            <!-- Body -->
+            <div class="p-6 space-y-6">
+                
+                <!-- Confidence -->
+                <div>
+                    <h4 class="font-bold text-gray-800 mb-2 flex items-center gap-2">
+                        <span class="bg-blue-100 text-blue-600 text-xs px-2 py-1 rounded">Confidence Threshold</span>
+                    </h4>
+                    <p class="text-sm text-gray-600 leading-relaxed">
+                        Determines how sure the AI needs to be before accepting a detection.
+                    </p>
+                    <ul class="mt-2 text-xs text-gray-500 list-disc list-inside">
+                        <li><strong>High (>70%):</strong> Fewer detections, but very accurate.</li>
+                        <li><strong>Low (<30%):</strong> More detections, but may include background noise.</li>
+                        <li><span class="text-orange-500">Tip:</span> If you see "Done" status but no masks, try lowering this to 20-30%.</li>
+                    </ul>
+                </div>
+
+                <!-- Mask Threshold -->
+                <div>
+                    <h4 class="font-bold text-gray-800 mb-2 flex items-center gap-2">
+                        <span class="bg-purple-100 text-purple-600 text-xs px-2 py-1 rounded">Mask Threshold</span>
+                    </h4>
+                    <p class="text-sm text-gray-600 leading-relaxed">
+                        Controls the "strictness" of the object boundaries.
+                    </p>
+                    <ul class="mt-2 text-xs text-gray-500 list-disc list-inside">
+                        <li><strong>High:</strong> Tighter masks, might miss thin parts (limbs, poles).</li>
+                        <li><strong>Low:</strong> Fuller masks, might spill over slightly.</li>
+                    </ul>
+                </div>
+
+                <!-- General Advice -->
+                <div class="bg-yellow-50 border border-yellow-100 rounded-lg p-3 flex gap-3 items-start">
+                    <i class="fa-solid fa-lightbulb text-yellow-500 mt-1"></i>
+                    <p class="text-xs text-yellow-700">
+                        Start with defaults (50%). If the object is complex or lighting is poor, lower the Confidence first.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex justify-end">
+                <button onclick="closeModelHelpModal()" class="bg-primary hover:bg-blue-800 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-md">
+                    Got it!
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-notification" class="fixed bottom-5 right-5 z-[150] transform transition-all duration-300 translate-y-20 opacity-0">
+        <div class="bg-white border-l-4 border-yellow-500 shadow-xl rounded-lg p-4 flex items-start gap-3 max-w-sm">
+            <div class="text-yellow-500 mt-0.5">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800 text-sm">No Objects Found</h4>
+                <p class="text-xs text-gray-600 mt-1">
+                    Analysis complete but no objects passed the threshold. Try lowering Confidence.
+                </p>
+            </div>
+            <button onclick="hideToast()" class="text-gray-400 hover:text-gray-600 ml-auto">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
         </div>
     </div>
 

@@ -348,6 +348,7 @@ async def video_processing_loop(manager, app_state):
         mask_thresh = app_state.get("mask_threshold", 0.5)
         sound_enabled = app_state.get("sound_enabled")
         max_limit = app_state.get("max_limit")
+        should_segment = app_state.get("should_segment", False)
 
         # RTSP State Management
         # If URL changed or became empty, release resource
@@ -373,7 +374,8 @@ async def video_processing_loop(manager, app_state):
             confidence,
             mask_thresh,
             sound_enabled,
-            max_limit
+            max_limit,
+            should_segment
         )
 
         # RTSP and Video always change
@@ -384,11 +386,21 @@ async def video_processing_loop(manager, app_state):
         force_update = False
         if not is_dynamic and last_payload:
             last_analytics = last_payload.get("analytics", {})
-            was_detecting = last_analytics.get("detected_object") not in [None, "", "N/A"]
+            was_prompt_set = last_analytics.get("detected_object") not in [None, "", "N/A"]
+            was_processing = last_analytics.get("process_status") == "Done"
+            
             is_cleared = (prompt is None or prompt == "") and (point_prompt is None)
-            if was_detecting and is_cleared:
+            
+            # Trigger 1: Prompt was removed
+            cond_prompt_removed = (was_prompt_set and is_cleared)
+            # Trigger 2: We were actively segmenting but now stopped (Clear Mask button)
+            cond_stopped_segmenting = (was_processing and not should_segment)
+
+            if cond_prompt_removed or cond_stopped_segmenting:
                 force_update = True
-                print("--- Force updating to clear mask ---")
+                print("--- INFO: Clearing mask state... ---")
+                last_payload = None # Fixes infinite loop
+                print("--- INFO: Mask state cleared ---")
 
         if not is_dynamic and not force_update and current_hash == last_state_hash and last_payload:
             # Just broadcast the cached result to keep UI alive
@@ -401,12 +413,20 @@ async def video_processing_loop(manager, app_state):
         # 1. Acquire Frame logic based on input mode
         frame_metadata = {}
 
-        if input_mode == "image" and uploaded_image_path and not rtsp_url and not video_file_path:
-            if video_capture: video_capture.release(); video_capture = None
-            frame = cv2.imread(uploaded_image_path)
-            if frame is None:
-                await asyncio.sleep(1)
-                continue
+        if input_mode == "image":
+            if not uploaded_image_path:
+                 # Invalidate cache if image is gone
+                 last_state_hash = None
+                 last_payload = None
+                 await asyncio.sleep(0.5)
+                 continue
+
+            if not rtsp_url and not video_file_path:
+                if video_capture: video_capture.release(); video_capture = None
+                frame = cv2.imread(uploaded_image_path)
+                if frame is None:
+                    await asyncio.sleep(1)
+                    continue
         elif input_mode == "rtsp" and rtsp_url and not uploaded_image_path and not video_file_path:
             if video_capture is None:
                 try:
@@ -491,7 +511,7 @@ async def video_processing_loop(manager, app_state):
         frame_counter += 1
         count = 0
         
-        should_process = (model and processor and (prompt or point_prompt))
+        should_process = (model and processor and (prompt or point_prompt) and should_segment)
         if input_mode in ["rtsp", "video"]:
              should_process = should_process and (frame_counter % 5 == 0)
 
@@ -561,11 +581,24 @@ async def video_processing_loop(manager, app_state):
         status = "Approved" if count >= app_state["max_limit"] else "Waiting"
         status_color = "green" if status == "Approved" else "orange"
         
+        # WARNING LOGIC (Backend-driven Toast)
+        # Reset warning flag if we find objects or stop segmenting
+        if count > 0 or not should_segment:
+            app_state["warning_sent"] = False
+            
+        warning_msg = None
+        if should_segment and count == 0 and not app_state.get("warning_sent", False):
+             warning_msg = "No objects detected. Try lowering confidence."
+             app_state["warning_sent"] = True
+             print(f"INFO: Inference finished but 0 objects. Sending UI Warning.")
+
         # LOGGING: Detect Success (State Change)
         if count > 0 and count != last_logged_count:
             print(f"INFO: Detecting Successful: Found {count} objects")
             last_logged_count = count
         elif count == 0:
+            if should_process and last_logged_count != 0:
+                print(f"INFO: Inference finished but 0 objects passed threshold (Conf: {confidence:.2f}, Mask: {mask_thresh:.2f}).")
             last_logged_count = 0 # Reset if empty
         
         # Use lower quality JPEG for stream to save bandwidth/cpu
@@ -583,7 +616,8 @@ async def video_processing_loop(manager, app_state):
             "max_limit": app_state["max_limit"],
             "status": status,
             "status_color": status_color,
-            "process_status": process_status, # Added to fix UI stuck in "Processing..."
+            "process_status": process_status,
+            "warning": warning_msg, # Send warning to UI
             "trigger_sound": (status == "Approved" and app_state["sound_enabled"])
         }
 

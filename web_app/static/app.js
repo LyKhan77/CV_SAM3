@@ -23,6 +23,7 @@ updateTime();
 let frontendState = {
     currentCount: 0,
     isClickSelectMode: false,
+    lastProcessStatus: "Ready"
 };
 
 // --- 3. WebSocket Connection ---
@@ -38,6 +39,92 @@ socket.onmessage = (event) => {
         console.error("Failed to parse WebSocket message:", e, "Raw data:", event.data);
     }
 };
+
+// --- Modal Functions ---
+function openHelpModal() {
+    const modal = document.getElementById('help-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        // Small timeout to allow display:block to apply before opacity transition
+        setTimeout(() => modal.classList.remove('opacity-0'), 10);
+    }
+}
+
+function closeHelpModal() {
+    const modal = document.getElementById('help-modal');
+    if (modal) {
+        modal.classList.add('opacity-0');
+        setTimeout(() => modal.classList.add('hidden'), 300);
+    }
+}
+
+function openInputHelpModal() {
+    const modal = document.getElementById('input-help-modal');
+    const content = document.getElementById('input-help-modal-content');
+    if (modal) {
+        modal.classList.remove('hidden');
+        setTimeout(() => {
+            modal.classList.remove('opacity-0');
+            content.classList.remove('scale-95');
+            content.classList.add('scale-100');
+        }, 10);
+    }
+}
+
+function closeInputHelpModal() {
+    const modal = document.getElementById('input-help-modal');
+    const content = document.getElementById('input-help-modal-content');
+    if (modal) {
+        modal.classList.add('opacity-0');
+        content.classList.remove('scale-100');
+        content.classList.add('scale-95');
+        setTimeout(() => modal.classList.add('hidden'), 300);
+    }
+}
+
+function openModelHelpModal() {
+    const modal = document.getElementById('model-help-modal');
+    const content = document.getElementById('model-help-modal-content');
+    if (modal) {
+        modal.classList.remove('hidden');
+        setTimeout(() => {
+            modal.classList.remove('opacity-0');
+            content.classList.remove('scale-95');
+            content.classList.add('scale-100');
+        }, 10);
+    }
+}
+
+function closeModelHelpModal() {
+    const modal = document.getElementById('model-help-modal');
+    const content = document.getElementById('model-help-modal-content');
+    if (modal) {
+        modal.classList.add('opacity-0');
+        content.classList.remove('scale-100');
+        content.classList.add('scale-95');
+        setTimeout(() => modal.classList.add('hidden'), 300);
+    }
+}
+
+// --- Toast Functions ---
+let toastTimeout;
+function showToast() {
+    const toast = document.getElementById('toast-notification');
+    if (toast) {
+        clearTimeout(toastTimeout);
+        toast.classList.remove('translate-y-20', 'opacity-0');
+        // Auto hide after 5 seconds
+        toastTimeout = setTimeout(hideToast, 5000);
+    }
+}
+
+function hideToast() {
+    const toast = document.getElementById('toast-notification');
+    if (toast) {
+        toast.classList.add('translate-y-20', 'opacity-0');
+    }
+}
+
 
 // Prevent WebSocket errors when closed
 socket.onclose = () => console.log("WebSocket connection closed.");
@@ -58,6 +145,7 @@ async function postData(endpoint, body) {
         if (endpoint.includes('config/stream')) alert(`Error communicating with the backend. Is it running?`);
     }
 }
+
 
 // --- 5. UI Event Handlers ---
 function activateStream() {
@@ -240,104 +328,99 @@ function setupSummaryListeners() {
 
 // --- 7. Dashboard Update Logic ---
 function updateDashboard(data) {
-    const analytics = data.analytics;
+    const { video_frame, analytics } = data;
+
+    // 1. Update Video Feed
+    const videoFeed = document.getElementById('mock-video-feed');
+    if (videoFeed) {
+        videoFeed.src = video_frame;
+        videoFeed.classList.remove('hidden');
+        
+        // If in RTSP/Video mode, ensure placeholder is hidden
+        if (analytics.input_mode !== 'image') {
+             document.getElementById('stream-placeholder').classList.add('hidden');
+        }
+    }
+
+    // 2. Update Analytics Text
     const countEl = document.getElementById('detected-count');
-    
-    // Update new status fields
-    const descPromptEl = document.getElementById('desc-prompt');
-    const descStatusEl = document.getElementById('desc-status');
+    const statusEl = document.getElementById('desc-status');
     const statusDot = document.getElementById('status-dot');
+    const descPromptEl = document.getElementById('desc-prompt');
     const runBtn = document.getElementById('run-segmentation-btn');
 
-    animateValue(countEl, frontendState.currentCount, analytics.count, 500);
-    frontendState.currentCount = analytics.count;
+    if (countEl) animateValue(countEl, parseInt(countEl.textContent), analytics.count, 500);
     
-    // Update Status UI from Backend State
-    if (descStatusEl && analytics.process_status) {
-        descStatusEl.textContent = analytics.process_status;
-        
-        if (analytics.process_status === "Processing...") {
-            if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-yellow-400 animate-pulse";
-        } else if (analytics.process_status === "Done") {
-            if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-green-500";
-            // Re-enable Run button and sliders
-            if (runBtn) {
-                runBtn.disabled = false;
-                runBtn.innerHTML = '<i class="fa-solid fa-play"></i> Run Segmentation';
-            }
-            document.getElementById('confidence-slider').disabled = false;
-            document.getElementById('mask-slider').disabled = false;
-        } else {
-             if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-gray-400";
-             // Ready state
-             if (runBtn) {
-                runBtn.disabled = false;
-                runBtn.innerHTML = '<i class="fa-solid fa-play"></i> Run Segmentation';
-             }
-             document.getElementById('confidence-slider').disabled = false;
-             document.getElementById('mask-slider').disabled = false;
-        }
-    }
-    
-    if (descPromptEl && analytics.detected_object !== "N/A") {
-        descPromptEl.textContent = analytics.detected_object;
-    }
-
-    // --- Updated Video Feed (Overlay) ---
-    const videoFeed = document.getElementById('mock-video-feed');
-    const placeholder = document.getElementById('stream-placeholder');
-    if (videoFeed && data.video_frame) {
-        videoFeed.src = data.video_frame;
-        videoFeed.classList.remove('hidden');
-        if (placeholder) placeholder.classList.add('hidden');
-    }
-
-    // --- Update Status Badge ---
-    const statusBadge = document.getElementById('status-badge');
-    if (statusBadge && analytics.status) {
-        statusBadge.textContent = analytics.status;
-        // Reset classes
-        statusBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors";
-        
-        if (analytics.status === "Approved") {
-            // "Approved" in this context implies condition met (Count >= Limit)
-            // User requested Sound Alert on this condition, so it might be an "Alert" state.
-            // However, naming "Approved" usually implies Success. 
-            // Let's use Red for Alert/Limit Reached to match the sound urgency.
-            statusBadge.classList.add("bg-red-200", "text-red-800");
-        } else {
-            statusBadge.classList.add("bg-yellow-100", "text-yellow-800");
-        }
-    }
-
-    // --- Update Progress Bar ---
+    // Update Progress Bar and Legend
     const progressBar = document.getElementById('progress-bar');
     const progressLegend = document.getElementById('progress-legend');
     
-    if (progressBar && analytics.max_limit > 0) {
-        const percentage = Math.min((analytics.count / analytics.max_limit) * 100, 100);
-        progressBar.style.width = `${percentage}%`;
+    if (progressBar && progressLegend) {
+        const maxLimit = analytics.max_limit || 100;
+        const percentage = Math.min((analytics.count / maxLimit) * 100, 100);
         
-        // Color logic: Red if over limit, Primary Blue otherwise
-        if (analytics.count >= analytics.max_limit) {
-            progressBar.className = "h-2 rounded-full bg-red-600 transition-all duration-500";
+        progressBar.style.width = `${percentage}%`;
+        // Color based on status
+        if (analytics.status === "Approved") {
+             progressBar.className = "h-full rounded-full transition-all duration-500 ease-out bg-green-500";
         } else {
-            progressBar.className = "h-2 rounded-full bg-primary transition-all duration-500";
+             progressBar.className = "h-full rounded-full transition-all duration-500 ease-out bg-blue-500";
         }
-    }
-    
-    if (progressLegend) {
-        progressLegend.textContent = `${analytics.count}/${analytics.max_limit}`;
+        
+        progressLegend.textContent = `${analytics.count}/${maxLimit}`;
     }
 
-    // --- Sound Alert ---
+    // Update Status Text & Dot
+    if (statusEl) statusEl.textContent = analytics.process_status || "Ready";
+    
+    if (statusDot) {
+        if (analytics.process_status === "Processing") {
+            statusDot.className = "w-2 h-2 rounded-full bg-yellow-400 animate-pulse";
+        } else if (analytics.status === "Approved") {
+            statusDot.className = "w-2 h-2 rounded-full bg-green-500";
+        } else {
+            statusDot.className = "w-2 h-2 rounded-full bg-blue-500"; // Waiting/Ready default
+        }
+    }
+
+    // Update Prompt Description
+    if (descPromptEl) {
+        descPromptEl.textContent = analytics.detected_object || "-";
+    }
+    
+    // 3. Button State & Sliders
+    // Unlock button if processing is done
+    if ((analytics.process_status === "Done" || analytics.process_status === "Ready") && runBtn && runBtn.disabled) {
+        runBtn.disabled = false;
+        runBtn.innerHTML = '<i class="fa-solid fa-play"></i> Run Segmentation';
+        
+        // Unlock sliders (unless we want them locked while results are shown? No, usually unlock)
+        document.getElementById('confidence-slider').disabled = false;
+        document.getElementById('mask-slider').disabled = false;
+    }
+    
+    // 4. Toast Notification Logic (Backend Driven)
+    // Backend sends a warning message ONE TIME when it detects 0 results.
+    if (analytics.warning) {
+        showToast();
+    }
+    // frontendState.lastProcessStatus check is no longer needed for toasts but kept if used elsewhere
+    frontendState.lastProcessStatus = analytics.process_status || "Ready";
+
+    // 5. Video Specific Updates
+    if (analytics.input_mode === 'video') {
+         const videoSeek = document.getElementById('video-seek');
+         if (videoSeek && !document.activeElement.isEqualNode(videoSeek)) {
+             updateVideoProgress(analytics.video_current_frame, analytics.video_total_frames);
+         }
+    }
+
+    // 6. Sound Trigger
     if (analytics.trigger_sound) {
         triggerNotification();
     }
 
-    // Sync Object List Clearing
-    // If detected object count goes to 0 and status is Ready (cleared), clear the list visual if needed?
-    // Actually, user requested explicit clearing on Image Remove.
+    frontendState.currentCount = analytics.count;
 }
 
 // ... (rest of file)
@@ -961,6 +1044,12 @@ async function clearUploadedImage() {
                 imageFileInput.value = '';
                 console.log("Cleared image file input");
             }
+            
+            // Clear Prompt UI (New)
+            const promptInput = document.getElementById('prompt-input');
+            const descPrompt = document.getElementById('desc-prompt');
+            if (promptInput) promptInput.value = '';
+            if (descPrompt) descPrompt.textContent = '-';
 
             // Reset display
             if (mockVideoFeed) {
