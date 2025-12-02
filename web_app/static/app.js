@@ -1105,6 +1105,26 @@ async function clearUploadedImage() {
             if (promptInput) promptInput.value = '';
             if (descPrompt) descPrompt.textContent = '-';
 
+            // Reset Analytics UI
+            const countEl = document.getElementById('detected-count');
+            const progressBar = document.getElementById('progress-bar');
+            const progressLegend = document.getElementById('progress-legend');
+            const resultBadge = document.getElementById('status-badge');
+            const statusEl = document.getElementById('desc-status');
+            const statusDot = document.getElementById('status-dot');
+
+            if (countEl) countEl.textContent = "0";
+            if (progressBar) progressBar.style.width = "0%";
+            if (progressLegend) progressLegend.textContent = "0/100";
+            
+            if (resultBadge) {
+                resultBadge.textContent = "Waiting";
+                resultBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors bg-blue-200 text-blue-800";
+            }
+            
+            if (statusEl) statusEl.textContent = "Ready";
+            if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-gray-400";
+
             // Reset display
             if (mockVideoFeed) {
                 mockVideoFeed.classList.add('hidden');
@@ -1128,6 +1148,8 @@ async function clearUploadedImage() {
             } else {
                 console.error("Object list container not found!");
             }
+            
+            showToast("File removed.", "success");
             
             switchInputMode('image');
         }
