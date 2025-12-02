@@ -2,45 +2,57 @@
 
 ## Project Overview
 
-This project is a static frontend prototype for an **AI Computer Vision Monitoring Dashboard**. The goal is to provide a user interface for monitoring a real-time video feed, where an AI model (specified as Meta's SAM 3 in the PRD) detects and counts objects based on user-provided text prompts.
+This project is an **AI Computer Vision Monitoring Dashboard** designed to detect and segment objects in real-time video feeds, uploaded videos, or static images. It utilizes **Meta's SAM 3 (Segment Anything Model 3)** for high-quality object segmentation based on user provided text prompts or point clicks.
 
-The application is built using plain **HTML, vanilla JavaScript, and Tailwind CSS**. All the code is self-contained in the `interface/index.html` file. The JavaScript currently implements a mock-up of the backend logic, simulating API calls, state changes, and video stream connections to demonstrate the UI's dynamic behavior.
+## Architecture
 
-The core requirements and API specifications are detailed in `prd.md`.
+The application follows a client-server architecture:
 
-## Building and Running
+*   **Backend:** Built with **FastAPI** (Python). It handles:
+    *   **API Endpoints:** Configuration (prompts, limits, input modes), file uploads, and system control.
+    *   **WebSocket (`/ws/monitor`):** Streams processed video frames (base64 encoded) and real-time analytics (detection counts, status) to the frontend.
+    *   **AI Processing:** Loads the SAM 3 model (via `transformers` and `torch`) and runs inference in an asynchronous loop (`video_processing_loop`).
+    *   **Video Management:** Uses **OpenCV** (`cv2`) for reading RTSP streams, video files, and image files.
+*   **Frontend:** A single-page application (SPA) built with **HTML5**, **Vanilla JavaScript**, and **Tailwind CSS**.
+    *   **Dynamic UI:** Updates in real-time based on WebSocket messages.
+    *   **Interactivity:** Users can set prompts, adjust model confidence/mask thresholds, upload media, and toggle settings like sound alerts.
 
-This is a static web project with no build process.
+## Tech Stack
 
-### Running the Application
+*   **Language:** Python 3.x, JavaScript (ES6+)
+*   **Web Framework:** FastAPI, Uvicorn
+*   **Computer Vision & AI:** PyTorch, Transformers (Hugging Face), OpenCV, Pillow
+*   **Frontend Styling:** Tailwind CSS (CDN)
+*   **Protocol:** HTTP (REST API) & WebSocket (Real-time Streaming)
 
-To run the prototype, you can either:
-1.  **Open the file directly:** Open `interface/index.html` in a modern web browser.
-2.  **Use a local web server:** For a more realistic environment (to avoid potential CORS issues if external resources were added), serve the `interface/` directory using a simple local server. For example, with Python:
+## Key Files & Structure
 
-    ```bash
-    # Navigate to the interface directory
-    cd interface
+*   **`main.py`**: The core entry point. Sets up the FastAPI app, manages global state (`app_state`), handles API routes, and manages the WebSocket connection.
+*   **`model.py`**: Encapsulates the AI logic. Contains `load_model()` to initialize SAM 3 and `video_processing_loop()` which runs the continuous inference cycle, including image preprocessing, model inference, and mask post-processing (NMS, smoothing).
+*   **`web_app/templates/index.html`**: The main UI file. Contains the HTML structure and Tailwind classes.
+*   **`web_app/static/app.js`**: Handles frontend logic: WebSocket communication, API calls (`postData`), UI event listeners, and DOM updates.
+*   **`ObjectList/`**: Directory where saved snapshots of segmented objects are stored.
+*   **`uploads/`**: Temporary storage for uploaded video and image files.
 
-    # If you have Python 3
-    python -m http.server
+## Features
 
-    # Then open http://localhost:8000 in your browser.
-    ```
+1.  **Multi-Input Support:**
+    *   **RTSP Stream:** Connect to live IP cameras.
+    *   **Video File:** Upload and process local video files.
+    *   **Image File:** Upload and segment static images.
+2.  **Interactive Segmentation:**
+    *   **Text Prompt:** Segment objects by description (e.g., "person", "red car").
+    *   **Point Click:** Click on the video feed to segment objects at that location.
+3.  **Real-time Monitoring:**
+    *   Visual feedback with colored masks overlay.
+    *   Object counting against a user-defined limit.
+    *   Status indicators (Ready, Processing, Approved, Waiting).
+4.  **Export:** Save detected objects as individual PNG thumbnails with metadata.
 
-## Development Conventions
+## Development & Usage
 
-*   **Structure**: All user-facing code resides in `interface/index.html`. There is no separate build system or package manager (`package.json`, etc.).
-*   **Styling**: The project uses **Tailwind CSS**, which is included via a CDN. Custom styles and animations are located in a `<style>` block in the `<head>`.
-*   **JavaScript**: All client-side logic is written in vanilla JavaScript and is located in a `<script>` tag at the end of the `<body>` of `interface/index.html`.
-*   **State Management**: A simple global `state` object is used to manage the application's state (e.g., `currentCount`, `maxLimit`).
-*   **Backend Simulation**: Backend interactions described in `prd.md` are simulated using `setTimeout` to mimic network latency and asynchronous operations. This allows the frontend to be developed and tested independently.
-
-## Key Files
-
-*   `interface/index.html`: The main and only file for the web application UI and frontend logic.
-*   `prd.md`: The Product Requirements Document, which outlines the project's goals, features, and technical specifications.
-*   `MockupUI.png`: A static image showing the intended design of the user interface.
+*   **Dependencies:** Listed in `requirements.txt`. Note the custom PyTorch index for CUDA support.
+*   **Running:** `python main.py` (or via a debugger configuration). Access at `http://127.0.0.1:8000`.
 
 =============================
 # Gemini CLI Dual Mode System
