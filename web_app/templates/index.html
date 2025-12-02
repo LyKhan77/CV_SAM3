@@ -317,7 +317,28 @@
                                 <label class="block text-sm font-medium text-gray-600 mb-1">Mask Threshold: <span id="mask-value" class="font-bold">50%</span></label>
                                 <input type="range" id="mask-slider" min="0" max="100" value="50" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
                             </div>
-                            
+
+                            <!-- Preset Configurations -->
+                            <div class="pt-2 border-t border-gray-100">
+                                <label class="block text-sm font-medium text-gray-600 mb-2">Quick Presets</label>
+                                <div class="flex gap-2">
+                                    <button onclick="applyPreset('quality')" class="flex-1 px-3 py-2 text-sm font-medium text-white bg-green-500 hover:bg-green-600 rounded-lg transition-colors">
+                                        Quality
+                                    </button>
+                                    <button onclick="applyPreset('balanced')" class="flex-1 px-3 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors">
+                                        Balanced
+                                    </button>
+                                    <button onclick="applyPreset('speed')" class="flex-1 px-3 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors">
+                                        Speed
+                                    </button>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-2">
+                                    <strong>Quality:</strong> Best segmentation, smooth masks<br>
+                                    <strong>Balanced:</strong> Good quality + performance<br>
+                                    <strong>Speed:</strong> Faster processing, sharper masks
+                                </p>
+                            </div>
+
                             <!-- Click to Select -->
                             <div class="flex items-center justify-between pt-2 border-t border-gray-100">
                                 <span class="text-sm font-medium text-gray-600">Click to Select</span>
@@ -465,8 +486,8 @@
                                 <i class="fa-solid fa-wave-square text-gray-500 text-sm"></i>
                                 <span class="text-sm font-medium text-gray-700">Result</span>
                             </div>
-                            <span id="status-badge" class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-green-200 text-green-800 transition-colors">
-                                Approved
+                            <span id="status-badge" class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-200 text-blue-800 transition-colors">
+                                Waiting
                             </span>
                         </div>
                         

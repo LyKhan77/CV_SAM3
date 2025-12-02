@@ -556,20 +556,42 @@ async def video_processing_loop(manager, app_state):
                 if inputs:
                     with torch.no_grad():
                         outputs = model(**inputs)
-                    
-                    # Optimized Post-Processing (Target size is ORIGINAL frame size)
-                    final_masks = process_sam3_outputs_optimized(
-                        outputs, 
-                        target_size=(orig_h, orig_w), 
-                        confidence_threshold=confidence,
-                        mask_threshold=mask_thresh
-                    )
+
+                    # ✅ OFFICIAL SAM-3 POST-PROCESSING (Meta's optimized pipeline)
+                    # Replaces custom process_sam3_outputs_optimized() for smooth, accurate results
+                    results = processor.post_process_instance_segmentation(
+                        outputs,
+                        threshold=confidence,  # Confidence threshold (IoU-based filtering)
+                        mask_threshold=mask_thresh,  # Mask binarization threshold
+                        target_sizes=[[orig_h, orig_w]]  # Resize masks to original frame size
+                    )[0]
+
+                    # Extract and convert masks to numpy uint8 format (for drawing & ObjectList/ export)
+                    final_masks = []
+                    if 'masks' in results and len(results['masks']) > 0:
+                        for mask in results['masks']:
+                            # Convert tensor/bool to numpy uint8
+                            if isinstance(mask, torch.Tensor):
+                                mask_np = mask.cpu().numpy()
+                            else:
+                                mask_np = np.array(mask)
+
+                            # Ensure uint8 format (0-255) for compatibility with draw_masks() and export
+                            if mask_np.dtype == bool:
+                                mask_uint8 = (mask_np.astype(np.uint8)) * 255
+                            elif mask_np.max() <= 1.0:
+                                mask_uint8 = (mask_np * 255).astype(np.uint8)
+                            else:
+                                mask_uint8 = mask_np.astype(np.uint8)
+
+                            final_masks.append(mask_uint8)
+
                     count = len(final_masks)
-                    
+
                     # SAVE STATE FOR EXPORT (Raw Masks & Frame)
                     app_state["last_processed_frame"] = frame.copy()
-                    app_state["last_raw_masks"] = final_masks # These are refined but binary masks
-                    
+                    app_state["last_raw_masks"] = final_masks  # Compatible format for ObjectList/ export
+
                     # Draw on ORIGINAL frame
                     draw_masks(frame, final_masks)
                     

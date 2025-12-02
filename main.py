@@ -165,6 +165,47 @@ async def set_input_mode(request: InputModeRequest):
     print(f"Input mode switched to: {mode}")
     return {"status": "success", "message": f"Input mode set to {mode}"}
 
+class PresetRequest(BaseModel):
+    preset: str  # "quality", "speed", "balanced"
+
+@app.post("/api/config/preset")
+async def apply_preset(request: PresetRequest):
+    """
+    Apply preset configurations for different scenarios.
+
+    Presets:
+    - quality: Lower thresholds for better detection, smoother masks
+    - speed: Higher thresholds for faster processing
+    - balanced: Optimal balance between quality and performance
+    """
+    presets = {
+        "quality": {
+            "confidence_threshold": 0.4,  # Lower = more detections
+            "mask_threshold": 0.6,  # Smoother, more inclusive masks
+        },
+        "speed": {
+            "confidence_threshold": 0.6,  # Higher = fewer candidates, faster
+            "mask_threshold": 0.7,  # Sharper masks (less processing)
+        },
+        "balanced": {
+            "confidence_threshold": 0.5,  # Default balanced value
+            "mask_threshold": 0.65,  # Middle ground
+        }
+    }
+
+    if request.preset not in presets:
+        return {"status": "error", "message": f"Invalid preset. Choose from: {list(presets.keys())}"}
+
+    # Update app_state with preset values
+    app_state.update(presets[request.preset])
+
+    print(f"✅ Applied '{request.preset}' preset: {presets[request.preset]}")
+    return {
+        "status": "success",
+        "preset": request.preset,
+        "config": presets[request.preset]
+    }
+
 @app.post("/api/upload/video")
 async def upload_video(file: UploadFile = File(...)):
     """

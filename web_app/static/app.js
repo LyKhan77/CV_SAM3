@@ -170,6 +170,37 @@ async function postData(endpoint, body) {
     }
 }
 
+// Apply Quick Preset (Quality/Balanced/Speed)
+async function applyPreset(preset) {
+    try {
+        console.log(`Applying preset: ${preset}`);
+        const response = await postData('/api/config/preset', { preset: preset });
+
+        if (response && response.status === 'success') {
+            // Update UI sliders to reflect new values
+            const config = response.config;
+            if (config.confidence_threshold !== undefined) {
+                const confidencePercent = Math.round(config.confidence_threshold * 100);
+                document.getElementById('confidence-slider').value = confidencePercent;
+                document.getElementById('confidence-value').textContent = `${confidencePercent}%`;
+            }
+            if (config.mask_threshold !== undefined) {
+                const maskPercent = Math.round(config.mask_threshold * 100);
+                document.getElementById('mask-slider').value = maskPercent;
+                document.getElementById('mask-value').textContent = `${maskPercent}%`;
+            }
+
+            showToast(`✅ Applied ${preset.toUpperCase()} preset`, 'success');
+            console.log(`Preset applied: ${JSON.stringify(config)}`);
+        } else {
+            showToast(`❌ Failed to apply preset: ${response?.message || 'Unknown error'}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error applying preset:', error);
+        showToast(`❌ Error applying preset: ${error.message}`, 'error');
+    }
+}
+
 
 // --- 5. UI Event Handlers ---
 function activateStream() {
