@@ -108,10 +108,34 @@ function closeModelHelpModal() {
 
 // --- Toast Functions ---
 let toastTimeout;
-function showToast() {
+function showToast(message, type = 'warning') {
     const toast = document.getElementById('toast-notification');
-    if (toast) {
+    const border = document.getElementById('toast-border');
+    const icon = document.getElementById('toast-icon');
+    const title = document.getElementById('toast-title');
+    const msgEl = document.getElementById('toast-message');
+
+    if (toast && border && icon && title && msgEl) {
         clearTimeout(toastTimeout);
+
+        // Configure Style based on Type
+        if (type === 'success') {
+            border.className = "bg-white border-l-4 border-green-500 shadow-xl rounded-lg p-4 flex items-start gap-3 max-w-sm";
+            icon.className = "text-green-500 mt-0.5";
+            icon.innerHTML = '<i class="fa-solid fa-circle-check"></i>';
+            title.textContent = "Success";
+        } else {
+            // Default Warning
+            border.className = "bg-white border-l-4 border-yellow-500 shadow-xl rounded-lg p-4 flex items-start gap-3 max-w-sm";
+            icon.className = "text-yellow-500 mt-0.5";
+            icon.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+            title.textContent = "Notification";
+        }
+
+        // Set Content
+        if (message) msgEl.textContent = message;
+
+        // Show
         toast.classList.remove('translate-y-20', 'opacity-0');
         // Auto hide after 5 seconds
         toastTimeout = setTimeout(hideToast, 5000);
@@ -222,7 +246,16 @@ async function runSegmentation() {
 }
 
 async function clearMask() {
+    const btn = document.getElementById('clear-mask-btn');
+    const originalContent = btn ? btn.innerHTML : '';
+
     try {
+        // UI Loading State
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<div class="loader w-4 h-4 border-red-500 border-t-transparent"></div> Clearing...';
+        }
+
         await postData("/api/config/clear-mask", {});
         
         // Clear Visuals
@@ -236,8 +269,18 @@ async function clearMask() {
         document.getElementById('confidence-slider').disabled = false;
         document.getElementById('mask-slider').disabled = false;
 
+        // Success Toast
+        showToast("Mask cleared successfully.", "success");
+
     } catch (e) {
         console.error("Clear mask failed:", e);
+        showToast("Failed to clear mask.", "warning");
+    } finally {
+        // Restore Button
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+        }
     }
 }
 
@@ -351,9 +394,10 @@ function updateDashboard(data) {
 
     if (countEl) animateValue(countEl, parseInt(countEl.textContent), analytics.count, 500);
     
-    // Update Progress Bar and Legend
+    // Update Progress Bar, Legend, and Result Badge
     const progressBar = document.getElementById('progress-bar');
     const progressLegend = document.getElementById('progress-legend');
+    const resultBadge = document.getElementById('status-badge');
     
     if (progressBar && progressLegend) {
         const maxLimit = analytics.max_limit || 100;
@@ -368,6 +412,16 @@ function updateDashboard(data) {
         }
         
         progressLegend.textContent = `${analytics.count}/${maxLimit}`;
+    }
+
+    // Update Result Badge
+    if (resultBadge) {
+        resultBadge.textContent = analytics.status;
+        if (analytics.status === "Approved") {
+             resultBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors bg-green-200 text-green-800";
+        } else {
+             resultBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors bg-blue-200 text-blue-800";
+        }
     }
 
     // Update Status Text & Dot
@@ -402,7 +456,7 @@ function updateDashboard(data) {
     // 4. Toast Notification Logic (Backend Driven)
     // Backend sends a warning message ONE TIME when it detects 0 results.
     if (analytics.warning) {
-        showToast();
+        showToast(analytics.warning, 'warning');
     }
     // frontendState.lastProcessStatus check is no longer needed for toasts but kept if used elsewhere
     frontendState.lastProcessStatus = analytics.process_status || "Ready";
