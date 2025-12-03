@@ -973,7 +973,6 @@ async function uploadVideo() {
             if (mockVideoFeed) mockVideoFeed.classList.remove('hidden');
 
             updateVideoMetadata(result);
-            await switchInputMode('video'); // Refresh backend state
 
             console.log("Video upload successful");
         } else {
@@ -1015,6 +1014,32 @@ async function clearVideo() {
             const videoFileInfo = document.getElementById('video-file-info');
             if (videoFileInfo) {
                 videoFileInfo.classList.add('hidden');
+            }
+
+            // Hide video feed and show placeholder
+            const mockVideoFeed = document.getElementById('mock-video-feed');
+            const streamPlaceholder = document.getElementById('stream-placeholder');
+
+            if (mockVideoFeed) {
+                mockVideoFeed.classList.add('hidden');
+                // Clear the image source to remove residual frame
+                const videoImage = mockVideoFeed.querySelector('img');
+                if (videoImage) {
+                    videoImage.src = '';
+                }
+            }
+
+            if (streamPlaceholder) {
+                streamPlaceholder.classList.remove('hidden');
+                // Reset placeholder to default video mode message
+                streamPlaceholder.innerHTML = `
+                    <p class="text-gray-400 text-lg mb-2">Drop Video File Here</p>
+                    <p class="text-gray-400 text-sm mb-4">or</p>
+                    <button onclick="document.getElementById('video-file').click()" class="bg-primary hover:bg-blue-800 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-md pointer-events-auto relative z-50">
+                        <i class="fa-solid fa-folder-open mr-2"></i>
+                        Browse Files
+                    </button>
+                `;
             }
 
             // Clear Object List

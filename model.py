@@ -361,6 +361,7 @@ async def video_processing_loop(manager, app_state):
                  print(f"--- RTSP URL changed/cleared. Releasing capture. Old: {current_active_rtsp}, New: {rtsp_url} ---")
                  video_capture.release()
                  video_capture = None
+                 app_state["video_capture"] = None  # Clear from app_state
             current_active_rtsp = rtsp_url
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -426,7 +427,10 @@ async def video_processing_loop(manager, app_state):
                  continue
 
             if not rtsp_url and not video_file_path:
-                if video_capture: video_capture.release(); video_capture = None
+                if video_capture:
+                    video_capture.release()
+                    video_capture = None
+                    app_state["video_capture"] = None  # Clear from app_state
                 frame = cv2.imread(uploaded_image_path)
                 if frame is None:
                     await asyncio.sleep(1)
@@ -453,11 +457,14 @@ async def video_processing_loop(manager, app_state):
                 except Exception as e:
                     print(f"Error opening video source: {e}")
                     video_capture = None
+                    app_state["video_capture"] = None  # Clear from app_state
                     await asyncio.sleep(2)
                     continue
             ret, frame = video_capture.read()
             if not ret:
-                video_capture.release(); video_capture = None
+                video_capture.release()
+                video_capture = None
+                app_state["video_capture"] = None  # Clear from app_state
                 continue
         elif input_mode == "video" and video_file_path and not rtsp_url and not uploaded_image_path:
             # Initialize video capture if needed
@@ -491,6 +498,7 @@ async def video_processing_loop(manager, app_state):
                         await asyncio.sleep(1)
 
                     video_capture = None
+                    app_state["video_capture"] = None  # Clear from app_state
                     continue
                 else:
                     video_open_retry_count = 0  # Reset on success

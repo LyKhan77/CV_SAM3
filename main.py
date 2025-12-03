@@ -296,6 +296,70 @@ async def toggle_video_playback(request: VideoPlaybackRequest):
     action = "playing" if request.playing else "paused"
     return {"status": "success", "message": f"Video {action}"}
 
+@app.post("/api/config/video/toggle")
+async def toggle_video_playback_simple():
+    """
+    Toggle video playback state (simple version without request body).
+    Frontend calls this to toggle play/pause.
+    """
+    if not app_state.get("video_file_path"):
+        return {"status": "error", "message": "No video file loaded"}
+
+    # Toggle the playing state
+    app_state["video_playing"] = not app_state.get("video_playing", False)
+
+    action = "playing" if app_state["video_playing"] else "paused"
+    return {
+        "status": "success",
+        "message": f"Video {action}",
+        "video_playing": app_state["video_playing"]
+    }
+
+@app.post("/api/config/video/clear")
+async def clear_video():
+    """
+    Clear uploaded video file and reset all video state.
+    Releases VideoCapture resource and deletes file from uploads/.
+    """
+    video_path = app_state.get("video_file_path")
+
+    # Release VideoCapture resource
+    video_capture = app_state.get("video_capture")
+    if video_capture:
+        try:
+            if hasattr(video_capture, 'release'):
+                video_capture.release()
+            print("VideoCapture released successfully")
+        except Exception as e:
+            print(f"Error releasing VideoCapture: {e}")
+
+    # Delete video file from uploads/
+    if video_path and os.path.exists(video_path):
+        try:
+            os.remove(video_path)
+            print(f"Deleted video file: {video_path}")
+        except Exception as e:
+            print(f"Error deleting video file: {e}")
+
+    # Reset all video-related state
+    app_state["video_file_path"] = None
+    app_state["video_capture"] = None
+    app_state["video_current_frame"] = 0
+    app_state["video_total_frames"] = None
+    app_state["video_fps"] = None
+    app_state["video_playing"] = True
+    app_state["video_seek_request"] = None
+    app_state["video_speed"] = 1.0
+
+    # Clear prompts and segmentation
+    app_state["prompt"] = None
+    app_state["point_prompt"] = None
+    app_state["should_segment"] = False
+    app_state["last_raw_masks"] = []
+
+    print("Video state cleared successfully")
+    return {"status": "success", "message": "Video cleared"}
+
 @app.post("/api/upload/image")
 async def upload_image(file: UploadFile = File(...)):
     """
