@@ -524,6 +524,9 @@ async def video_processing_loop(manager, app_state):
     # Log Cache
     last_logged_count = -1
 
+    # Preserve count for Image Mode (to prevent reset to 0 after caching)
+    last_count = 0
+
     # Video open retry tracking
     video_open_retry_count = 0
     MAX_VIDEO_OPEN_RETRIES = 3
@@ -602,6 +605,7 @@ async def video_processing_loop(manager, app_state):
                 force_update = True
                 print("--- INFO: Clearing mask state... ---")
                 last_payload = None # Fixes infinite loop
+                last_count = 0  # Reset count for Image Mode
                 print("--- INFO: Mask state cleared ---")
 
         if not is_dynamic and not force_update and current_hash == last_state_hash and last_payload:
@@ -890,7 +894,9 @@ async def video_processing_loop(manager, app_state):
 
         # 2. Process Frame
         frame_counter += 1
-        count = 0
+        # For Image Mode: Preserve last count (prevents reset to 0 after caching)
+        # For RTSP/Video: Always reset to 0 (continuous stream)
+        count = last_count if input_mode == "image" else 0
         is_currently_processing = False  # Track if we're actively running inference THIS iteration
 
         should_process = (model and processor and (prompt or point_prompt) and should_segment)
@@ -977,6 +983,10 @@ async def video_processing_loop(manager, app_state):
                             final_masks.append(mask_uint8)
 
                     count = len(final_masks)
+
+                    # Update last_count for Image Mode persistence
+                    if input_mode == "image":
+                        last_count = count
 
                     # SAVE STATE FOR EXPORT (Raw Masks & Frame)
                     app_state["last_processed_frame"] = frame.copy()
