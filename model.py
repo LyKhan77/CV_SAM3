@@ -5,6 +5,7 @@ import json
 import torch
 import torchvision # Added for NMS
 import numpy as np
+import colorsys
 from PIL import Image
 from transformers import Sam3Processor, Sam3Model
 import torch.nn.functional as F
@@ -17,9 +18,15 @@ def draw_masks(frame, masks):
     if not masks:
         return
     
-    color = (0, 255, 0) # Green
-    
     for i, mask in enumerate(masks):
+        # Generate unique color for each mask using Golden Angle approach
+        # This ensures distinct colors even for adjacent indices
+        hue = (i * 0.618033988749895) % 1.0
+        # High saturation (0.85) and value (0.95) for bright, visible colors
+        r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 0.95)
+        # Convert to BGR (0-255) for OpenCV
+        color = (int(b * 255), int(g * 255), int(r * 255))
+        
         try:
             # Ensure mask is uint8 binary (0 or 1/255)
             if mask.max() > 1:
