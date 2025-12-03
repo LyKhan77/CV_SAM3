@@ -321,9 +321,6 @@ async def video_processing_loop(manager, app_state):
     # Track active RTSP URL to detect changes
     current_active_rtsp = None
 
-    # Reduce input size to save VRAM (Max dimension)
-    MAX_INPUT_SIZE = 1024
-
     # State Cache
     last_state_hash = None
     last_payload = None
@@ -353,6 +350,10 @@ async def video_processing_loop(manager, app_state):
         sound_enabled = app_state.get("sound_enabled")
         max_limit = app_state.get("max_limit")
         should_segment = app_state.get("should_segment", False)
+
+        # Get performance parameters (for Video Mode optimization)
+        processing_interval = app_state.get("processing_interval", 5)
+        MAX_INPUT_SIZE = app_state.get("max_input_size", 1024)
 
         # RTSP State Management
         # If URL changed or became empty, release resource
@@ -549,15 +550,19 @@ async def video_processing_loop(manager, app_state):
         # 2. Process Frame
         frame_counter += 1
         count = 0
-        
+        is_currently_processing = False  # Track if we're actively running inference THIS iteration
+
         should_process = (model and processor and (prompt or point_prompt) and should_segment)
         if input_mode in ["rtsp", "video"]:
-             should_process = should_process and (frame_counter % 5 == 0)
+             # Use dynamic processing_interval instead of hardcoded 5
+             should_process = should_process and (frame_counter % processing_interval == 0)
 
         if should_process:
+            is_currently_processing = True  # Set flag BEFORE inference starts
+
             # Save original dimensions for drawing later
             orig_h, orig_w = frame.shape[:2]
-            
+
             # Resize frame for inference to save VRAM
             h, w = orig_h, orig_w
             scale = 1.0
@@ -569,7 +574,7 @@ async def video_processing_loop(manager, app_state):
                 frame_resized = frame
 
             image_pil = Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB))
-            
+
             inputs = None
             try:
                 # Prepare Inputs
@@ -670,9 +675,20 @@ async def video_processing_loop(manager, app_state):
         # Use lower quality JPEG for stream to save bandwidth/cpu
         _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         jpg_b64 = base64.b64encode(buffer).decode('utf-8')
-        
-        # Determine Process Status for UI (Unlock "Processing..." state)
-        process_status = "Done" if app_state.get("should_segment") else "Ready"
+
+        # Determine Process Status for UI (✅ FIXED: Ready → Processing → Done flow)
+        if is_currently_processing:
+            # Inference is actively running THIS frame
+            process_status = "Processing..."
+        elif should_segment and count > 0:
+            # Segmentation is enabled AND we have results (from previous processed frame)
+            process_status = "Done"
+        elif should_segment and count == 0:
+            # Segmentation enabled but no results yet (or empty result)
+            process_status = "Processing..." if should_process else "Done"
+        else:
+            # Segmentation not enabled (Clear Mask or no prompt)
+            process_status = "Ready"
 
         # Merge analytics with any frame metadata
         analytics = {

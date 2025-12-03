@@ -339,6 +339,44 @@
                                 </p>
                             </div>
 
+                            <!-- Video Performance Options (Only visible in Video Mode) -->
+                            <div data-mode="video" class="pt-2 border-t border-gray-100 hidden">
+                                <label class="block text-sm font-medium text-gray-600 mb-2">
+                                    <i class="fa-solid fa-gauge-high text-orange-500 mr-1"></i> Performance Tuning
+                                </label>
+
+                                <!-- Processing Interval -->
+                                <div class="mb-4">
+                                    <label class="block text-xs text-gray-500 mb-1">
+                                        Processing Interval: <span id="interval-value" class="font-bold text-gray-700">Every 5 frames</span>
+                                    </label>
+                                    <input type="range" id="interval-slider" min="1" max="30" value="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-orange-500">
+                                    <div class="flex justify-between text-xs text-gray-400 mt-1">
+                                        <span>Real-time (1)</span>
+                                        <span>Low GPU (30)</span>
+                                    </div>
+                                </div>
+
+                                <!-- Input Resolution -->
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-2">Input Resolution</label>
+                                    <div class="flex gap-2">
+                                        <button onclick="setResolution(1024)" id="res-1024" class="flex-1 px-2 py-1.5 text-xs font-medium text-white bg-primary rounded transition-colors">
+                                            1024px
+                                        </button>
+                                        <button onclick="setResolution(768)" id="res-768" class="flex-1 px-2 py-1.5 text-xs font-medium text-gray-600 bg-gray-200 hover:bg-gray-300 rounded transition-colors">
+                                            768px
+                                        </button>
+                                        <button onclick="setResolution(512)" id="res-512" class="flex-1 px-2 py-1.5 text-xs font-medium text-gray-600 bg-gray-200 hover:bg-gray-300 rounded transition-colors">
+                                            512px
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1.5">
+                                        Lower = Faster (for RTX 3050/4GB GPU)
+                                    </p>
+                                </div>
+                            </div>
+
                             <!-- Click to Select -->
                             <div class="flex items-center justify-between pt-2 border-t border-gray-100">
                                 <span class="text-sm font-medium text-gray-600">Click to Select</span>
@@ -460,7 +498,7 @@
                     </div>
 
                     <!-- Detected Objects (Export) -->
-                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                    <div data-mode="image rtsp" class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
                         <div class="flex justify-between items-center mb-3">
                             <h3 class="text-lg font-bold text-primary">Detected Objects</h3>
                             <button onclick="saveAndviewResults()" class="bg-green-500 hover:bg-green-600 text-white font-bold px-3 py-1 rounded text-xs shadow-sm gap-2 flex items-center">
@@ -495,7 +533,7 @@
                     </div>
 
                     <!-- Summary Panel (Existing) -->
-                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col gap-4">
+                    <div data-mode="image rtsp" class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col gap-4">
                         <h3 class="text-xl font-bold text-primary">Summary</h3>
                         
                         <!-- Activate Sound -->

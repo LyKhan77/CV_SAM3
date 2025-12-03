@@ -356,9 +356,58 @@ function setupModelConfigListeners() {
         });
         maskSlider.addEventListener('change', updateModelConfig);
     }
+
+    // Video Performance Tuning Listeners
+    const intervalSlider = document.getElementById('interval-slider');
+    const intervalValue = document.getElementById('interval-value');
+
+    if (intervalSlider && intervalValue) {
+        intervalSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            intervalValue.textContent = value === '1' ? 'Every frame (Real-time)' : `Every ${value} frames`;
+        });
+        intervalSlider.addEventListener('change', async (e) => {
+            const interval = parseInt(e.target.value);
+            try {
+                const response = await postData('/api/config/video/interval', { interval });
+                if (response.status === 'success') {
+                    console.log(`Processing interval updated to: ${interval}`);
+                }
+            } catch (error) {
+                console.error('Error updating interval:', error);
+            }
+        });
+    }
 }
 
-// --- 6.1 Summary Panel Listeners ---
+// --- 6.1 Video Performance Functions ---
+async function setResolution(resolution) {
+    try {
+        const response = await postData('/api/config/video/resolution', { resolution });
+
+        if (response.status === 'success') {
+            // Update button states
+            ['res-1024', 'res-768', 'res-512'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    if (id === `res-${resolution}`) {
+                        btn.className = 'flex-1 px-2 py-1.5 text-xs font-medium text-white bg-primary rounded transition-colors';
+                    } else {
+                        btn.className = 'flex-1 px-2 py-1.5 text-xs font-medium text-gray-600 bg-gray-200 hover:bg-gray-300 rounded transition-colors';
+                    }
+                }
+            });
+
+            showToast(`Resolution set to ${resolution}px`, 'success');
+            console.log(`Input resolution updated to: ${resolution}px`);
+        }
+    } catch (error) {
+        console.error('Error updating resolution:', error);
+        showToast('Failed to update resolution', 'error');
+    }
+}
+
+// --- 6.2 Summary Panel Listeners ---
 function updateSound() {
     const enabled = document.getElementById('sound-toggle').checked;
     postData("/api/config/sound", { enabled: enabled }).then(data => {
@@ -424,34 +473,39 @@ function updateDashboard(data) {
     const runBtn = document.getElementById('run-segmentation-btn');
 
     if (countEl) animateValue(countEl, parseInt(countEl.textContent), analytics.count, 500);
-    
-    // Update Progress Bar, Legend, and Result Badge
-    const progressBar = document.getElementById('progress-bar');
-    const progressLegend = document.getElementById('progress-legend');
-    const resultBadge = document.getElementById('status-badge');
-    
-    if (progressBar && progressLegend) {
-        const maxLimit = analytics.max_limit || 100;
-        const percentage = Math.min((analytics.count / maxLimit) * 100, 100);
-        
-        progressBar.style.width = `${percentage}%`;
-        // Color based on status
-        if (analytics.status === "Approved") {
-             progressBar.className = "h-full rounded-full transition-all duration-500 ease-out bg-green-500";
-        } else {
-             progressBar.className = "h-full rounded-full transition-all duration-500 ease-out bg-blue-500";
-        }
-        
-        progressLegend.textContent = `${analytics.count}/${maxLimit}`;
-    }
 
-    // Update Result Badge
-    if (resultBadge) {
-        resultBadge.textContent = analytics.status;
-        if (analytics.status === "Approved") {
-             resultBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors bg-green-200 text-green-800";
-        } else {
-             resultBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors bg-blue-200 text-blue-800";
+    // Update Summary Panel (only for Image and RTSP modes, skip for Video mode)
+    const currentMode = document.querySelector('input[name="input-mode"]:checked')?.value;
+
+    if (currentMode !== 'video') {
+        // Update Progress Bar, Legend, and Result Badge
+        const progressBar = document.getElementById('progress-bar');
+        const progressLegend = document.getElementById('progress-legend');
+        const resultBadge = document.getElementById('status-badge');
+
+        if (progressBar && progressLegend) {
+            const maxLimit = analytics.max_limit || 100;
+            const percentage = Math.min((analytics.count / maxLimit) * 100, 100);
+
+            progressBar.style.width = `${percentage}%`;
+            // Color based on status
+            if (analytics.status === "Approved") {
+                 progressBar.className = "h-full rounded-full transition-all duration-500 ease-out bg-green-500";
+            } else {
+                 progressBar.className = "h-full rounded-full transition-all duration-500 ease-out bg-blue-500";
+            }
+
+            progressLegend.textContent = `${analytics.count}/${maxLimit}`;
+        }
+
+        // Update Result Badge
+        if (resultBadge) {
+            resultBadge.textContent = analytics.status;
+            if (analytics.status === "Approved") {
+                 resultBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors bg-green-200 text-green-800";
+            } else {
+                 resultBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-colors bg-blue-200 text-blue-800";
+            }
         }
     }
 
@@ -763,6 +817,14 @@ async function switchInputMode(mode) {
     if (promptInput) promptInput.value = '';
     if (descPrompt) descPrompt.textContent = 'Click "Run Mask" to start';
 
+    // Reset state for Video mode - clear detected objects message
+    if (mode === 'video') {
+        const objectListContainer = document.getElementById('object-list-container');
+        if (objectListContainer) {
+            objectListContainer.innerHTML = '<p class="col-span-full text-center text-sm text-gray-400">Export not available in Video mode</p>';
+        }
+    }
+
     // 2. Show Selected Control Panel
     const targetPanel = document.getElementById(`${mode}-panel`);
     if (targetPanel) targetPanel.classList.remove('hidden');
@@ -832,12 +894,29 @@ async function switchInputMode(mode) {
         }
     }
 
-    // 4. Notify Backend
+    // 4. Update mode-specific panel visibility
+    updateModePanelVisibility(mode);
+
+    // 5. Notify Backend
     try {
         await postData('/api/config/input-mode', { mode: mode });
     } catch (error) {
         console.error('Error switching input mode:', error);
     }
+}
+
+function updateModePanelVisibility(mode) {
+    // Hide all mode-specific panels first
+    document.querySelectorAll('[data-mode]').forEach(panel => {
+        panel.classList.add('hidden');
+    });
+
+    // Show panels for current mode
+    document.querySelectorAll(`[data-mode*="${mode}"]`).forEach(panel => {
+        panel.classList.remove('hidden');
+    });
+
+    console.log(`Updated panel visibility for mode: ${mode}`);
 }
 
 async function setRtspUrl() {

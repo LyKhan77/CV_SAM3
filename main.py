@@ -34,6 +34,12 @@ class VideoSeekRequest(BaseModel):
 class VideoPlaybackRequest(BaseModel):
     playing: bool
 
+class VideoIntervalRequest(BaseModel):
+    interval: int = Field(..., ge=1, le=30)
+
+class VideoResolutionRequest(BaseModel):
+    resolution: int = Field(..., ge=256, le=2048)
+
 # --- 2. Application State & WebSocket Manager ---
 app_state: Dict[str, Any] = {
     "rtsp_url": None,
@@ -58,6 +64,9 @@ app_state: Dict[str, Any] = {
     "video_playing": True,              # Video playback state
     "video_seek_request": None,         # Seek frame index
     "video_speed": 1.0,                 # Playback speed multiplier
+    # Video Performance Parameters (for RTX 3050 4GB optimization)
+    "processing_interval": 5,           # Process every N frames (default 5)
+    "max_input_size": 1024,             # Max input resolution (1024/768/512)
 }
 
 class ConnectionManager:
@@ -161,6 +170,24 @@ async def set_input_mode(request: InputModeRequest):
     app_state["input_mode"] = mode
     app_state["prompt"] = None  # Clear existing prompts
     app_state["point_prompt"] = None
+
+    # Mode-specific state reset
+    if mode == "video":
+        # Video Mode: Clear export-related state
+        app_state["last_processed_frame"] = None
+        app_state["last_raw_masks"] = []
+        app_state["should_segment"] = False
+
+    elif mode == "image":
+        # Image Mode: Reset to fresh state
+        app_state["last_processed_frame"] = None
+        app_state["last_raw_masks"] = []
+        app_state["should_segment"] = False
+
+    elif mode == "rtsp":
+        # RTSP Mode: Keep cumulative tracking state
+        # Don't reset should_segment (monitoring can stay active)
+        pass
 
     print(f"Input mode switched to: {mode}")
     return {"status": "success", "message": f"Input mode set to {mode}"}
@@ -360,6 +387,37 @@ async def clear_video():
     print("Video state cleared successfully")
     return {"status": "success", "message": "Video cleared"}
 
+@app.post("/api/config/video/interval")
+async def set_processing_interval(request: VideoIntervalRequest):
+    """
+    Set processing interval (skip frames) for Video Mode.
+    Higher values = Better performance on low-end GPUs (RTX 3050 4GB).
+    """
+    interval = request.interval
+    app_state["processing_interval"] = interval
+    print(f"Processing interval set to: {interval} (process every {interval} frames)")
+    return {
+        "status": "success",
+        "message": f"Processing interval updated to {interval}",
+        "interval": interval
+    }
+
+@app.post("/api/config/video/resolution")
+async def set_input_resolution(request: VideoResolutionRequest):
+    """
+    Set max input resolution for inference.
+    Lower values = Faster processing, less VRAM usage.
+    Recommended for RTX 3050 4GB: 768px or 512px
+    """
+    resolution = request.resolution
+    app_state["max_input_size"] = resolution
+    print(f"Max input resolution set to: {resolution}px")
+    return {
+        "status": "success",
+        "message": f"Input resolution updated to {resolution}px",
+        "resolution": resolution
+    }
+
 @app.post("/api/upload/image")
 async def upload_image(file: UploadFile = File(...)):
     """
@@ -466,9 +524,18 @@ async def save_snapshot():
     Save current masks and crops to ObjectList/{filename}/ folder.
     Returns list of objects for UI.
     """
+    current_mode = app_state.get("input_mode")
+
+    # Validate mode supports export
+    if current_mode == "video":
+        return {
+            "status": "error",
+            "message": "Export not available in Video mode. Use Image mode to export specific frames."
+        }
+
     frame = app_state.get("last_processed_frame")
     masks = app_state.get("last_raw_masks")
-    
+
     if frame is None or masks is None or len(masks) == 0:
         return {"status": "error", "message": "No processed objects found to save."}
         
