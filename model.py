@@ -1018,18 +1018,34 @@ async def video_processing_loop(manager, app_state):
         jpg_b64 = base64.b64encode(buffer).decode('utf-8')
 
         # Determine Process Status for UI (✅ FIXED: Ready → Processing → Done flow)
-        if is_currently_processing:
-            # Inference is actively running THIS frame
-            process_status = "Processing..."
-        elif should_segment and count > 0:
-            # Segmentation is enabled AND we have results (from previous processed frame)
-            process_status = "Done"
-        elif should_segment and count == 0:
-            # Segmentation enabled but no results yet (or empty result)
-            process_status = "Processing..." if should_process else "Done"
+        if input_mode == "image":
+            # IMAGE MODE: Set to Done immediately after inference completes
+            if should_segment and count > 0:
+                # Segmentation finished with results
+                process_status = "Done"
+            elif should_segment and count == 0:
+                # Segmentation finished but no results (filter too strict or no objects)
+                process_status = "Done"
+            elif should_segment and is_currently_processing:
+                # Currently processing (rare, might only show briefly)
+                process_status = "Processing..."
+            else:
+                # No segmentation active
+                process_status = "Ready"
         else:
-            # Segmentation not enabled (Clear Mask or no prompt)
-            process_status = "Ready"
+            # RTSP/VIDEO MODE: Keep existing logic for continuous streams
+            if is_currently_processing:
+                # Inference is actively running THIS frame
+                process_status = "Processing..."
+            elif should_segment and count > 0:
+                # Segmentation is enabled AND we have results (from previous processed frame)
+                process_status = "Done"
+            elif should_segment and count == 0:
+                # Segmentation enabled but no results yet (or empty result)
+                process_status = "Processing..." if should_process else "Done"
+            else:
+                # Segmentation not enabled (Clear Mask or no prompt)
+                process_status = "Ready"
 
         # Merge analytics with any frame metadata
         analytics = {
