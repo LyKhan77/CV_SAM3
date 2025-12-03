@@ -28,15 +28,20 @@ def draw_masks(frame, masks):
         color = (int(b * 255), int(g * 255), int(r * 255))
         
         try:
-            # Ensure mask is uint8 binary (0 or 1/255)
-            if mask.max() > 1:
-                mask = (mask > 127).astype(np.uint8)
+            # Ensure mask is uint8 0-255 range for resizing and blurring
+            # If mask is 0/1, scale to 0/255
+            if mask.max() <= 1:
+                mask = (mask * 255).astype(np.uint8)
             else:
-                mask = (mask > 0).astype(np.uint8)
+                mask = mask.astype(np.uint8)
             
-            # If mask size doesn't match frame, resize it (final safety net)
+            # If mask size doesn't match frame, resize it with LINEAR interpolation for smoothness
             if mask.shape[:2] != frame.shape[:2]:
-                mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
+                mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_LINEAR)
+            
+            # Apply slight blur to soften pixelated edges
+            mask = cv2.GaussianBlur(mask, (5, 5), 0)
+            _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                 
             # Segmentation mode
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -44,7 +49,8 @@ def draw_masks(frame, masks):
                 # SMOOTHING: Approximation
                 smoothed_contours = []
                 for cnt in contours:
-                    epsilon = 0.005 * cv2.arcLength(cnt, True) # 0.5% error margin
+                    # Use very small epsilon (0.2%) to keep details but remove pixel steps
+                    epsilon = 0.002 * cv2.arcLength(cnt, True) 
                     approx = cv2.approxPolyDP(cnt, epsilon, True)
                     smoothed_contours.append(approx)
 
