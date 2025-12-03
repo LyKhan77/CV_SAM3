@@ -377,8 +377,8 @@
                                 </div>
                             </div>
 
-                            <!-- Click to Select -->
-                            <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+                            <!-- Click to Select (Hidden in Video Mode) -->
+                            <div data-mode="image rtsp" class="flex items-center justify-between pt-2 border-t border-gray-100">
                                 <span class="text-sm font-medium text-gray-600">Click to Select</span>
                                 <div class="relative inline-block w-10 align-middle select-none">
                                     <input type="checkbox" id="select-object-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-gray-300 checked:border-primary left-0 checked:left-5 transition-all duration-300"/>
@@ -457,6 +457,27 @@
                             <div id="video-file-info" class="hidden flex justify-between items-center border border-gray-200 rounded p-2 bg-gray-50">
                                 <span id="video-filename" class="text-sm text-gray-600 truncate max-w-[200px]">-</span>
                                 <button onclick="clearVideo()" class="text-red-500 hover:text-red-700"><i class="fa-solid fa-times"></i></button>
+                            </div>
+
+                            <!-- Batch Processing Progress Bar (Hidden by default) -->
+                            <div id="batch-progress-container" class="hidden mt-3 p-4 border border-blue-200 rounded bg-blue-50">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <div class="loader w-4 h-4 border-blue-500 border-t-transparent"></div>
+                                    <span class="text-sm font-medium text-blue-700">Processing Video...</span>
+                                </div>
+
+                                <!-- Progress Bar -->
+                                <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                                    <div id="batch-progress-bar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                                </div>
+
+                                <!-- Progress Text + Cancel Button -->
+                                <div class="flex justify-between items-center mt-2 text-xs text-gray-600">
+                                    <span id="batch-progress-text">Frame 0 / 0 (0%)</span>
+                                    <button onclick="cancelBatchProcessing()" class="text-red-500 hover:text-red-700 font-medium">
+                                        Cancel
+                                    </button>
+                                </div>
                             </div>
 
                             <!-- Video Playback Controls -->

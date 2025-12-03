@@ -302,16 +302,212 @@ def load_model():
         print("--- Loading SAM-3 Model ---")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {device}")
-        
+
         model_id = "facebook/sam3"
         processor = Sam3Processor.from_pretrained(model_id)
         model = Sam3Model.from_pretrained(model_id).to(device)
-        
+
         print("--- Model Loaded Successfully ---")
         return model, processor
     except Exception as e:
         print(f"FATAL: Failed to load model: {e}")
         return None, None
+
+async def batch_process_video(app_state, video_path, prompt, point_prompt, confidence, mask_thresh, max_input_size=1024):
+    """
+    Batch process all frames in a video file with progress tracking.
+    Stores processed frames (with masks drawn) in app_state["video_cache"].
+
+    Args:
+        app_state: Application state dictionary
+        video_path: Path to video file
+        prompt: Text prompt for segmentation
+        point_prompt: Point coordinates for segmentation
+        confidence: Confidence threshold
+        mask_thresh: Mask threshold
+        max_input_size: Max input resolution for inference
+
+    Returns:
+        True if successful, False if error/cancelled
+    """
+    print(f"--- Starting Batch Processing: {video_path} ---")
+
+    # Close preview capture if exists (cleanup from raw playback mode)
+    if hasattr(app_state, '_preview_cap') and app_state.get('_preview_cap') is not None:
+        app_state['_preview_cap'].release()
+        app_state['_preview_cap'] = None
+        app_state['_preview_video_path'] = None
+
+    # 1. Open video and get metadata
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"[ERROR] Failed to open video: {video_path}")
+        return False
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+
+    # Limit processing to max 1000 frames for memory safety
+    MAX_FRAMES = 1000
+    if total_frames > MAX_FRAMES:
+        print(f"[WARNING] Video has {total_frames} frames, limiting to {MAX_FRAMES}")
+        total_frames = MAX_FRAMES
+
+    print(f"Batch processing {total_frames} frames at {fps:.2f} FPS")
+
+    # 2. Initialize cache
+    app_state["video_cache"] = {
+        "video_path": video_path,
+        "prompt": prompt,
+        "confidence": confidence,
+        "mask_threshold": mask_thresh,
+        "total_frames": total_frames,
+        "fps": fps,
+        "frames": [],
+        "processing_complete": False,
+        "current_progress": 0,
+    }
+
+    # 3. Set batch processing flag
+    app_state["batch_processing_active"] = True
+    app_state["batch_progress_total"] = total_frames
+
+    # Get model references
+    model = app_state.get("model")
+    processor = app_state.get("processor")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if not model or not processor:
+        print("[ERROR] Model not loaded!")
+        app_state["batch_processing_active"] = False
+        cap.release()
+        return False
+
+    # 4. Process each frame
+    processed_frames = []
+
+    for frame_idx in range(total_frames):
+        # Check if processing was cancelled
+        if not app_state.get("batch_processing_active", False):
+            print("[INFO] Batch processing cancelled by user")
+            cap.release()
+            return False
+
+        # Read frame
+        ret, frame = cap.read()
+        if not ret:
+            print(f"[WARNING] Failed to read frame {frame_idx}, stopping")
+            break
+
+        # Update progress
+        app_state["batch_progress_current"] = frame_idx + 1
+        progress_percent = int(((frame_idx + 1) / total_frames) * 100)
+        app_state["video_cache"]["current_progress"] = progress_percent
+
+        # Progress logging every 10 frames
+        if (frame_idx + 1) % 10 == 0 or frame_idx == 0:
+            print(f"Processing frame {frame_idx + 1}/{total_frames} ({progress_percent}%)")
+
+        # Run inference (same logic as video_processing_loop)
+        count = 0
+        try:
+            orig_h, orig_w = frame.shape[:2]
+
+            # Resize for inference
+            h, w = orig_h, orig_w
+            scale = 1.0
+            if max(h, w) > max_input_size:
+                scale = max_input_size / max(h, w)
+                new_w, new_h = int(w * scale), int(h * scale)
+                frame_resized = cv2.resize(frame, (new_w, new_h))
+            else:
+                frame_resized = frame
+
+            image_pil = Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB))
+
+            # Prepare inputs
+            inputs = None
+            if prompt:
+                inputs = processor(
+                    text=[prompt],
+                    images=image_pil,
+                    return_tensors="pt"
+                ).to(device)
+            elif point_prompt:
+                abs_x = int(point_prompt["x"] * orig_w)
+                abs_y = int(point_prompt["y"] * orig_h)
+                curr_w, curr_h = image_pil.size
+                scaled_x = int(abs_x * (curr_w / orig_w))
+                scaled_y = int(abs_y * (curr_h / orig_h))
+                inputs = processor(
+                    images=image_pil,
+                    input_points=[[[scaled_x, scaled_y]]],
+                    return_tensors="pt"
+                ).to(device)
+
+            # Run inference
+            if inputs:
+                with torch.no_grad():
+                    outputs = model(**inputs)
+
+                # Post-process using official processor
+                results = processor.post_process_instance_segmentation(
+                    outputs,
+                    threshold=confidence,
+                    mask_threshold=mask_thresh,
+                    target_sizes=[[orig_h, orig_w]]
+                )[0]
+
+                # Extract masks
+                final_masks = []
+                if 'masks' in results and len(results['masks']) > 0:
+                    for mask in results['masks']:
+                        if isinstance(mask, torch.Tensor):
+                            mask_np = mask.cpu().numpy()
+                        else:
+                            mask_np = np.array(mask)
+
+                        if mask_np.dtype == bool:
+                            mask_uint8 = (mask_np.astype(np.uint8)) * 255
+                        elif mask_np.max() <= 1.0:
+                            mask_uint8 = (mask_np * 255).astype(np.uint8)
+                        else:
+                            mask_uint8 = mask_np.astype(np.uint8)
+
+                        final_masks.append(mask_uint8)
+
+                count = len(final_masks)
+
+                # Draw masks on frame
+                draw_masks(frame, final_masks)
+
+        except Exception as e:
+            print(f"[ERROR] Inference failed on frame {frame_idx}: {e}")
+            torch.cuda.empty_cache()
+            # Continue with unprocessed frame
+
+        # Encode frame as JPEG
+        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+        jpg_b64 = base64.b64encode(buffer).decode('utf-8')
+
+        # Store in cache
+        processed_frames.append({
+            "idx": frame_idx,
+            "base64": f"data:image/jpeg;base64,{jpg_b64}",
+            "count": count,
+        })
+
+        # Yield control to allow other async tasks
+        await asyncio.sleep(0.001)
+
+    # 5. Finalize cache
+    app_state["video_cache"]["frames"] = processed_frames
+    app_state["video_cache"]["processing_complete"] = True
+    app_state["batch_processing_active"] = False
+
+    cap.release()
+    print(f"--- Batch Processing Complete: {len(processed_frames)} frames processed ---")
+    return True
 
 async def video_processing_loop(manager, app_state):
     print("--- Video Processing Loop Started ---")
@@ -468,81 +664,226 @@ async def video_processing_loop(manager, app_state):
                 app_state["video_capture"] = None  # Clear from app_state
                 continue
         elif input_mode == "video" and video_file_path and not rtsp_url and not uploaded_image_path:
-            # Initialize video capture if needed
-            if video_capture is None or not video_capture.isOpened():
-                # Check if already opened during upload
-                existing_capture = app_state.get("video_capture")
-                if existing_capture and existing_capture.isOpened():
-                    video_capture = existing_capture
-                    print("Reusing existing VideoCapture from upload")
-                else:
-                    video_capture = cv2.VideoCapture(video_file_path)
-                if not video_capture.isOpened():
-                    video_open_retry_count += 1
-                    print(f"Failed to open video file: {video_file_path} (attempt {video_open_retry_count}/{MAX_VIDEO_OPEN_RETRIES})")
+            # VIDEO MODE: Check if batch processing or playback mode
 
-                    if video_open_retry_count >= MAX_VIDEO_OPEN_RETRIES:
-                        # Send error notification to frontend via WebSocket
-                        error_payload = {
-                            "status": "error",
-                            "message": f"Failed to open video after {MAX_VIDEO_OPEN_RETRIES} attempts",
-                            "video_frame": None,
-                            "analytics": {
-                                "input_mode": "video",
-                                "error": f"Video file inaccessible: {video_file_path}"
-                            }
+            # If batch processing active, send progress updates
+            if app_state.get("batch_processing_active", False):
+                # Broadcast progress
+                progress_current = app_state.get("batch_progress_current", 0)
+                progress_total = app_state.get("batch_progress_total", 0)
+                cache = app_state.get("video_cache", {})
+                progress_percent = cache.get("current_progress", 0) if cache else 0
+
+                # Create progress payload
+                # Get current prompt for display
+                current_prompt = app_state.get("prompt")
+                point_prompt = app_state.get("point_prompt")
+
+                progress_payload = {
+                    "status": "batch_processing",
+                    "video_frame": None,  # No frame during processing
+                    "analytics": {
+                        "input_mode": "video",
+                        "process_status": "Processing...",
+                        "detected_object": current_prompt if current_prompt else ("Selected Point" if point_prompt else "N/A"),
+                        "batch_progress": {
+                            "current": progress_current,
+                            "total": progress_total,
+                            "percent": progress_percent,
                         }
-                        await manager.broadcast(json.dumps(error_payload))
-                        video_open_retry_count = 0  # Reset counter
-                        await asyncio.sleep(5)  # Wait longer before next attempt
-                    else:
-                        await asyncio.sleep(1)
+                    }
+                }
 
-                    video_capture = None
-                    app_state["video_capture"] = None  # Clear from app_state
-                    continue
-                else:
-                    video_open_retry_count = 0  # Reset on success
+                await manager.broadcast(json.dumps(progress_payload))
+                await asyncio.sleep(0.1)
+                continue
 
-                total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
-                fps = video_capture.get(cv2.CAP_PROP_FPS)
-                app_state["video_total_frames"] = total_frames
-                app_state["video_fps"] = fps
-                print(f"Video loaded: {total_frames} frames, {fps:.2f} FPS")
+            # Check if cache exists and is complete
+            cache = app_state.get("video_cache")
+            if cache and cache.get("processing_complete", False):
+                # PLAYBACK MODE: Read from cache
 
-            # Handle seek requests
-            if video_seek_request is not None:
-                video_capture.set(cv2.CAP_PROP_POS_FRAMES, video_seek_request)
-                app_state["video_current_frame"] = video_seek_request
-                app_state["video_seek_request"] = None
+                # Handle seek request
+                if video_seek_request is not None:
+                    app_state["video_current_frame"] = video_seek_request
+                    app_state["video_seek_request"] = None
 
-            # Read frame based on playback state
-            if video_playing:
-                ret, frame = video_capture.read()
-                if not ret:
-                    # Loop video
-                    video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                # Get current frame index
+                current_idx = app_state.get("video_current_frame", 0)
+
+                # Handle playback control
+                if not video_playing:
+                    # Paused: Send current frame repeatedly
+                    if 0 <= current_idx < len(cache["frames"]):
+                        cached_frame = cache["frames"][current_idx]
+
+                        frame_metadata = {
+                            "input_mode": "video",
+                            "video_current_frame": current_idx,
+                            "video_total_frames": cache["total_frames"],
+                            "video_fps": cache["fps"],
+                            "video_playing": False
+                        }
+
+                        count = cached_frame["count"]
+                        status = "Approved" if count >= app_state["max_limit"] else "Waiting"
+                        status_color = "green" if status == "Approved" else "orange"
+
+                        analytics = {
+                            "input_mode": "video",
+                            "detected_object": cache["prompt"] or "N/A",
+                            "count": count,
+                            "max_limit": app_state["max_limit"],
+                            "status": status,
+                            "status_color": status_color,
+                            "process_status": "Done",
+                            "warning": None,
+                            "trigger_sound": False
+                        }
+                        analytics.update(frame_metadata)
+
+                        payload = {
+                            "video_frame": cached_frame["base64"],
+                            "analytics": analytics
+                        }
+
+                        await manager.broadcast(json.dumps(payload))
+                        await asyncio.sleep(0.1)
+                        continue
+
+                # Playing: Advance frame
+                # Loop video if at end
+                if current_idx >= len(cache["frames"]):
+                    current_idx = 0
                     app_state["video_current_frame"] = 0
-                    ret, frame = video_capture.read()
-                    if ret:
-                        app_state["video_current_frame"] = 0  # Fixed: Was 1, now 0
-                else:
-                    app_state["video_current_frame"] += 1
-            else:
-                # Pause: get current frame
-                current_frame_pos = video_capture.get(cv2.CAP_PROP_POS_FRAMES)
-                ret, frame = video_capture.read()
-                # Reset position if we accidentally advanced
-                video_capture.set(cv2.CAP_PROP_POS_FRAMES, current_frame_pos)
 
-            # Add video metadata for WebSocket
-            frame_metadata = {
-                "input_mode": "video",
-                "video_current_frame": app_state["video_current_frame"],
-                "video_total_frames": app_state.get("video_total_frames", 0),
-                "video_fps": app_state.get("video_fps", 0),
-                "video_playing": video_playing
-            }
+                # Get cached frame
+                cached_frame = cache["frames"][current_idx]
+
+                # Advance to next frame
+                app_state["video_current_frame"] = current_idx + 1
+
+                # Prepare analytics
+                frame_metadata = {
+                    "input_mode": "video",
+                    "video_current_frame": current_idx,
+                    "video_total_frames": cache["total_frames"],
+                    "video_fps": cache["fps"],
+                    "video_playing": True
+                }
+
+                count = cached_frame["count"]
+                status = "Approved" if count >= app_state["max_limit"] else "Waiting"
+                status_color = "green" if status == "Approved" else "orange"
+
+                analytics = {
+                    "input_mode": "video",
+                    "detected_object": cache["prompt"] or "N/A",
+                    "count": count,
+                    "max_limit": app_state["max_limit"],
+                    "status": status,
+                    "status_color": status_color,
+                    "process_status": "Done",
+                    "warning": None,
+                    "trigger_sound": (status == "Approved" and app_state["sound_enabled"])
+                }
+                analytics.update(frame_metadata)
+
+                payload = {
+                    "video_frame": cached_frame["base64"],
+                    "analytics": analytics
+                }
+
+                await manager.broadcast(json.dumps(payload))
+
+                # Control playback speed
+                fps = cache.get("fps", 30)
+                if fps <= 0 or fps > 240:
+                    fps = 30
+                await asyncio.sleep(1.0 / fps)
+                continue
+
+            else:
+                # No cache: Show RAW video playback (without masks) before batch processing
+                # This allows user to preview/verify video before running segmentation
+
+                # Open video for raw playback
+                if not hasattr(app_state, '_preview_cap') or app_state.get('_preview_video_path') != video_file_path:
+                    # Close old capture if exists
+                    if hasattr(app_state, '_preview_cap') and app_state['_preview_cap'] is not None:
+                        app_state['_preview_cap'].release()
+
+                    # Open new video
+                    app_state['_preview_cap'] = cv2.VideoCapture(video_file_path)
+                    app_state['_preview_video_path'] = video_file_path
+                    app_state['_preview_total_frames'] = int(app_state['_preview_cap'].get(cv2.CAP_PROP_FRAME_COUNT))
+                    app_state['_preview_fps'] = app_state['_preview_cap'].get(cv2.CAP_PROP_FPS)
+
+                    # Initialize playback state if not set
+                    if "video_current_frame" not in app_state:
+                        app_state["video_current_frame"] = 0
+                    if "video_playing" not in app_state:
+                        app_state["video_playing"] = False
+
+                cap = app_state['_preview_cap']
+                total_frames = app_state['_preview_total_frames']
+                fps = app_state['_preview_fps']
+
+                # Handle seek
+                video_seek_request = app_state.get("video_seek_request")
+                if video_seek_request is not None:
+                    app_state["video_current_frame"] = video_seek_request
+                    app_state["video_seek_request"] = None
+
+                # Get current frame index
+                current_idx = app_state.get("video_current_frame", 0)
+
+                # Handle playback
+                if video_playing:
+                    # Playing: Advance frame
+                    current_idx = (current_idx + 1) % total_frames
+                    app_state["video_current_frame"] = current_idx
+
+                # Read frame
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_idx)
+                ret, frame = cap.read()
+
+                if not ret:
+                    # Reset to start if read fails
+                    app_state["video_current_frame"] = 0
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ret, frame = cap.read()
+
+                if ret:
+                    # Encode raw frame as JPEG
+                    _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                    jpg_b64 = base64.b64encode(buffer).decode('utf-8')
+
+                    # Get current prompt for display
+                    current_prompt = app_state.get("prompt")
+                    point_prompt = app_state.get("point_prompt")
+
+                    preview_payload = {
+                        "status": "waiting_batch",
+                        "video_frame": f"data:image/jpeg;base64,{jpg_b64}",
+                        "analytics": {
+                            "input_mode": "video",
+                            "process_status": "Ready",
+                            "detected_object": current_prompt if current_prompt else ("Selected Point" if point_prompt else "N/A"),
+                            "count": 0,
+                            "video_current_frame": current_idx,
+                            "video_total_frames": total_frames,
+                            "video_fps": fps,
+                            "video_playing": app_state.get("video_playing", False),
+                        }
+                    }
+                    await manager.broadcast(json.dumps(preview_payload))
+
+                # FPS-based sleep
+                if fps <= 0 or fps > 240:
+                    fps = 30
+                await asyncio.sleep(1.0 / fps)
+                continue
         else:
             await asyncio.sleep(0.5)
             continue

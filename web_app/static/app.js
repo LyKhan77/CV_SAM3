@@ -453,12 +453,102 @@ function setupSummaryListeners() {
 function updateDashboard(data) {
     const { video_frame, analytics } = data;
 
+    // Handle Batch Processing Progress (Video Mode specific)
+    if (data.status === "batch_processing" && analytics.batch_progress) {
+        const progressContainer = document.getElementById('batch-progress-container');
+        const progressBar = document.getElementById('batch-progress-bar');
+        const progressText = document.getElementById('batch-progress-text');
+        const playbackControls = document.getElementById('video-playback-controls');
+
+        if (progressContainer) {
+            progressContainer.classList.remove('hidden');
+        }
+        if (playbackControls) {
+            playbackControls.classList.add('hidden'); // Hide playback controls during processing
+        }
+
+        const { current, total, percent } = analytics.batch_progress;
+
+        if (progressBar) {
+            progressBar.style.width = `${percent}%`;
+        }
+        if (progressText) {
+            progressText.textContent = `Frame ${current} / ${total} (${percent}%)`;
+        }
+
+        // Lock Run button
+        const runBtn = document.getElementById('run-segmentation-btn');
+        if (runBtn) {
+            runBtn.disabled = true;
+            runBtn.innerHTML = '<div class="loader w-4 h-4 border-white border-t-transparent"></div> Processing...';
+        }
+
+        // Lock all input controls
+        const promptInput = document.getElementById('prompt-input');
+        const confSlider = document.getElementById('confidence-slider');
+        const maskSlider = document.getElementById('mask-slider');
+        const intervalSlider = document.getElementById('interval-slider');
+
+        if (promptInput) promptInput.disabled = true;
+        if (confSlider) confSlider.disabled = true;
+        if (maskSlider) maskSlider.disabled = true;
+        if (intervalSlider) intervalSlider.disabled = true;
+
+        // Lock mode switching
+        document.querySelectorAll('input[name="input-mode"]').forEach(radio => {
+            radio.disabled = true;
+        });
+
+        // Update status
+        const statusEl = document.getElementById('desc-status');
+        const statusDot = document.getElementById('status-dot');
+        if (statusEl) statusEl.textContent = "Processing...";
+        if (statusDot) statusDot.className = "w-2 h-2 rounded-full bg-yellow-400 animate-pulse";
+
+        return; // Skip rest of update logic during batch processing
+    }
+
+    // Handle Video Mode UI states
+    const progressContainer = document.getElementById('batch-progress-container');
+    const playbackControls = document.getElementById('video-playback-controls');
+    const currentMode = document.querySelector('input[name="input-mode"]:checked')?.value;
+
+    if (currentMode === 'video') {
+        // Show playback controls when Ready (waiting for batch) or Done (batch complete)
+        if (playbackControls && (analytics.process_status === "Ready" || analytics.process_status === "Done")) {
+            playbackControls.classList.remove('hidden');
+        }
+
+        // Hide progress bar when not processing
+        if (progressContainer && analytics.process_status !== "Processing...") {
+            progressContainer.classList.add('hidden');
+        }
+
+        // Unlock controls when Done or Ready
+        if (analytics.process_status === "Done" || analytics.process_status === "Ready") {
+            const promptInput = document.getElementById('prompt-input');
+            const confSlider = document.getElementById('confidence-slider');
+            const maskSlider = document.getElementById('mask-slider');
+            const intervalSlider = document.getElementById('interval-slider');
+
+            if (promptInput) promptInput.disabled = false;
+            if (confSlider) confSlider.disabled = false;
+            if (maskSlider) maskSlider.disabled = false;
+            if (intervalSlider) intervalSlider.disabled = false;
+
+            // Unlock mode switching
+            document.querySelectorAll('input[name="input-mode"]').forEach(radio => {
+                radio.disabled = false;
+            });
+        }
+    }
+
     // 1. Update Video Feed
     const videoFeed = document.getElementById('mock-video-feed');
-    if (videoFeed) {
+    if (videoFeed && video_frame) {
         videoFeed.src = video_frame;
         videoFeed.classList.remove('hidden');
-        
+
         // If in RTSP/Video mode, ensure placeholder is hidden
         if (analytics.input_mode !== 'image') {
              document.getElementById('stream-placeholder').classList.add('hidden');
@@ -475,7 +565,6 @@ function updateDashboard(data) {
     if (countEl) animateValue(countEl, parseInt(countEl.textContent), analytics.count, 500);
 
     // Update Summary Panel (only for Image and RTSP modes, skip for Video mode)
-    const currentMode = document.querySelector('input[name="input-mode"]:checked')?.value;
 
     if (currentMode !== 'video') {
         // Update Progress Bar, Legend, and Result Badge
@@ -1069,6 +1158,44 @@ async function uploadVideo() {
         } catch (resetError) {
             console.error("Error resetting video mode:", resetError);
         }
+    }
+}
+
+// Cancel batch processing
+async function cancelBatchProcessing() {
+    try {
+        await postData('/api/config/clear-mask', {});
+        showToast('Batch processing cancelled', 'warning');
+
+        // Reset UI
+        const progressContainer = document.getElementById('batch-progress-container');
+        if (progressContainer) {
+            progressContainer.classList.add('hidden');
+        }
+
+        const runBtn = document.getElementById('run-segmentation-btn');
+        if (runBtn) {
+            runBtn.disabled = false;
+            runBtn.innerHTML = '<i class="fa-solid fa-play"></i> Run Segmentation';
+        }
+
+        // Unlock controls
+        const promptInput = document.getElementById('prompt-input');
+        const confSlider = document.getElementById('confidence-slider');
+        const maskSlider = document.getElementById('mask-slider');
+        const intervalSlider = document.getElementById('interval-slider');
+
+        if (promptInput) promptInput.disabled = false;
+        if (confSlider) confSlider.disabled = false;
+        if (maskSlider) maskSlider.disabled = false;
+        if (intervalSlider) intervalSlider.disabled = false;
+
+        // Unlock mode switching
+        document.querySelectorAll('input[name="input-mode"]').forEach(radio => {
+            radio.disabled = false;
+        });
+    } catch (error) {
+        console.error('Error cancelling batch processing:', error);
     }
 }
 

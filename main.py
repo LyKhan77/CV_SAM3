@@ -67,6 +67,11 @@ app_state: Dict[str, Any] = {
     # Video Performance Parameters (for RTX 3050 4GB optimization)
     "processing_interval": 5,           # Process every N frames (default 5)
     "max_input_size": 1024,             # Max input resolution (1024/768/512)
+    # Video Batch Processing State
+    "video_cache": None,                # Cache structure for processed frames
+    "batch_processing_active": False,   # True when batch processing in progress
+    "batch_progress_current": 0,        # Current frame being processed
+    "batch_progress_total": 0,          # Total frames to process
 }
 
 class ConnectionManager:
@@ -116,6 +121,14 @@ async def set_stream_url(request: StreamRequest):
 async def set_prompt(request: PromptRequest):
     app_state["prompt"] = request.object_name if request.object_name.strip() else None
     app_state["point_prompt"] = None # Clear point prompt when text prompt is used/cleared
+
+    # Invalidate cache if prompt changed (Video Mode only)
+    if app_state.get("input_mode") == "video":
+        cache = app_state.get("video_cache")
+        if cache and cache.get("prompt") != app_state["prompt"]:
+            app_state["video_cache"] = None
+            print("[INFO] Video cache invalidated: prompt changed")
+
     print(f"Prompt updated: '{app_state['prompt']}' (Point prompt cleared)")
     return {"status": "success", "message": f"Prompt set to '{request.object_name}'"}
 
@@ -134,6 +147,15 @@ async def set_sound_toggle(request: SoundRequest):
 async def set_model_config(request: ModelConfigRequest):
     app_state["confidence_threshold"] = request.confidence
     app_state["mask_threshold"] = request.mask_threshold
+
+    # Invalidate cache if thresholds changed (Video Mode only)
+    if app_state.get("input_mode") == "video":
+        cache = app_state.get("video_cache")
+        if cache and (cache.get("confidence") != request.confidence or
+                      cache.get("mask_threshold") != request.mask_threshold):
+            app_state["video_cache"] = None
+            print("[INFO] Video cache invalidated: model config changed")
+
     print(f"Model config updated: Confidence={request.confidence}, Mask={request.mask_threshold}")
     return {"status": "success", "message": "Model config updated"}
 
@@ -154,6 +176,14 @@ async def set_input_mode(request: InputModeRequest):
         if app_state.get("video_capture"):
             app_state["video_capture"].release()
             app_state["video_capture"] = None
+        # Clean up preview capture
+        if hasattr(app_state, '_preview_cap') and app_state.get('_preview_cap') is not None:
+            app_state['_preview_cap'].release()
+            app_state['_preview_cap'] = None
+            app_state['_preview_video_path'] = None
+        # Clear batch state
+        app_state["batch_processing_active"] = False
+        app_state["video_cache"] = None
 
     elif mode == "video":
         app_state["rtsp_url"] = None
@@ -166,6 +196,14 @@ async def set_input_mode(request: InputModeRequest):
         if app_state.get("video_capture"):
             app_state["video_capture"].release()
             app_state["video_capture"] = None
+        # Clean up preview capture
+        if hasattr(app_state, '_preview_cap') and app_state.get('_preview_cap') is not None:
+            app_state['_preview_cap'].release()
+            app_state['_preview_cap'] = None
+            app_state['_preview_video_path'] = None
+        # Clear batch state
+        app_state["batch_processing_active"] = False
+        app_state["video_cache"] = None
 
     app_state["input_mode"] = mode
     app_state["prompt"] = None  # Clear existing prompts
@@ -384,6 +422,22 @@ async def clear_video():
     app_state["should_segment"] = False
     app_state["last_raw_masks"] = []
 
+    # Clear batch processing state and cache
+    app_state["batch_processing_active"] = False
+    app_state["video_cache"] = None
+    app_state["batch_progress_current"] = 0
+    app_state["batch_progress_total"] = 0
+
+    # Clean up preview capture if exists
+    if hasattr(app_state, '_preview_cap') and app_state.get('_preview_cap') is not None:
+        try:
+            app_state['_preview_cap'].release()
+            print("Preview VideoCapture released successfully")
+        except Exception as e:
+            print(f"Error releasing preview VideoCapture: {e}")
+        app_state['_preview_cap'] = None
+        app_state['_preview_video_path'] = None
+
     print("Video state cleared successfully")
     return {"status": "success", "message": "Video cleared"}
 
@@ -504,19 +558,79 @@ async def clear_uploaded_image():
 async def run_segmentation():
     """
     Trigger segmentation process.
+    For Video Mode: Start batch processing.
+    For Image/RTSP: Set flag as before.
     """
-    app_state["should_segment"] = True
-    return {"status": "success", "message": "Segmentation started"}
+    input_mode = app_state.get("input_mode", "rtsp")
+
+    if input_mode == "video":
+        # Video Mode: Batch processing
+        video_path = app_state.get("video_file_path")
+        prompt = app_state.get("prompt")
+        point_prompt = app_state.get("point_prompt")
+        confidence = app_state.get("confidence_threshold", 0.5)
+        mask_thresh = app_state.get("mask_threshold", 0.5)
+        max_input_size = app_state.get("max_input_size", 1024)
+
+        if not video_path:
+            return {"status": "error", "message": "No video file loaded"}
+
+        if not (prompt or point_prompt):
+            return {"status": "error", "message": "No prompt set"}
+
+        # Check if already processing
+        if app_state.get("batch_processing_active", False):
+            return {"status": "error", "message": "Batch processing already in progress"}
+
+        # Check if cache exists and matches current config
+        cache = app_state.get("video_cache")
+        if cache and cache.get("processing_complete", False):
+            # Check if cache is valid
+            if (cache["video_path"] == video_path and
+                cache["prompt"] == prompt and
+                cache["confidence"] == confidence and
+                cache["mask_threshold"] == mask_thresh):
+                # Cache valid, no need to reprocess
+                print("[INFO] Using existing cache (parameters unchanged)")
+                return {"status": "success", "message": "Using cached results"}
+
+        # Start batch processing in background
+        from model import batch_process_video
+        print("[INFO] Starting batch processing task for video")
+        asyncio.create_task(batch_process_video(
+            app_state, video_path, prompt, point_prompt,
+            confidence, mask_thresh, max_input_size
+        ))
+
+        return {"status": "success", "message": "Batch processing started"}
+
+    else:
+        # Image/RTSP Mode: Traditional flag-based approach
+        app_state["should_segment"] = True
+        return {"status": "success", "message": "Segmentation started"}
 
 @app.post("/api/config/clear-mask")
 async def clear_mask():
     """
     Stop segmentation and clear masks.
+    For Video Mode: Clear cache and stop batch processing.
+    For Image/RTSP: Clear segmentation flags.
     """
-    app_state["should_segment"] = False
-    app_state["last_raw_masks"] = []
-    # We don't clear last_processed_frame because we still want to show the image
-    return {"status": "success", "message": "Masks cleared"}
+    input_mode = app_state.get("input_mode", "rtsp")
+
+    if input_mode == "video":
+        # Video Mode: Stop batch processing and clear cache
+        app_state["batch_processing_active"] = False
+        app_state["video_cache"] = None
+        app_state["batch_progress_current"] = 0
+        app_state["batch_progress_total"] = 0
+        return {"status": "success", "message": "Cache cleared, batch processing stopped"}
+    else:
+        # Image/RTSP Mode: Keep existing logic
+        app_state["should_segment"] = False
+        app_state["last_raw_masks"] = []
+        # We don't clear last_processed_frame because we still want to show the image
+        return {"status": "success", "message": "Masks cleared"}
 
 @app.post("/api/snapshot/save")
 async def save_snapshot():
