@@ -621,6 +621,21 @@
                         </div>
                     </div>
 
+                    <!-- Download Video Panel (New) -->
+                    <div id="download-video-panel" class="hidden bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                        <h3 class="text-xl font-bold text-primary mb-4">Export</h3>
+                        <div class="bg-green-50 rounded-lg p-4 border border-green-100 text-center">
+                            <div class="mb-3">
+                                <i class="fa-solid fa-file-video text-4xl text-green-500"></i>
+                            </div>
+                            <p class="text-sm font-medium text-gray-800 mb-1">Processing Complete</p>
+                            <p class="text-xs text-gray-500 mb-4">Your segmented video is ready.</p>
+                            <button onclick="downloadProcessedVideo()" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded-lg text-sm shadow-sm transition-colors flex justify-center items-center gap-2">
+                                <i class="fa-solid fa-download"></i> Download Video
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Summary Panel (Existing) -->
                     <div data-mode="image rtsp" class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col gap-4">
                         <h3 class="text-xl font-bold text-primary">Summary</h3>

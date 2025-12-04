@@ -8,7 +8,7 @@ import base64
 import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
@@ -634,6 +634,31 @@ async def clear_mask():
         app_state["clicked_points"] = []  # Clear clicked points
         # We don't clear last_processed_frame because we still want to show the image
         return {"status": "success", "message": "Masks cleared"}
+
+@app.post("/api/snapshot/save")
+async def save_snapshot():
+    """
+    Save current masks and crops to ObjectList/{filename}/ folder.
+    Returns list of output objects for UI.
+    """
+    current_mode = app_state.get("input_mode")
+    # ... (existing logic) ...
+
+@app.get("/api/video/download")
+async def download_processed_video():
+    """
+    Download the processed video file from the last batch processing session.
+    """
+    cache = app_state.get("video_cache")
+    if not cache or not cache.get("output_path"):
+        return {"status": "error", "message": "No processed video available"}
+    
+    file_path = cache["output_path"]
+    if not os.path.exists(file_path):
+        return {"status": "error", "message": "Video file not found on server"}
+        
+    filename = os.path.basename(file_path)
+    return FileResponse(file_path, filename=filename, media_type='video/mp4', headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 @app.post("/api/snapshot/save")
 async def save_snapshot():

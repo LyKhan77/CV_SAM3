@@ -2,6 +2,7 @@ import asyncio
 import cv2
 import base64
 import json
+import os
 import torch
 import torchvision # Added for NMS
 import numpy as np
@@ -402,6 +403,24 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
 
     print(f"Batch processing {total_frames} frames at {fps:.2f} FPS")
 
+    # Setup Video Writer
+    os.makedirs("processed_videos", exist_ok=True)
+    base_name = os.path.basename(video_path)
+    name, ext = os.path.splitext(base_name)
+    output_filename = f"{name}_segmented.mp4"
+    output_path = os.path.join("processed_videos", output_filename)
+    
+    # Get properties for writer
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Initialize VideoWriter
+    # mp4v is widely supported for .mp4 container
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+    out_writer = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+    
+    print(f"[INFO] Recording processed video to: {output_path}")
+
     # 2. Initialize cache
     app_state["video_cache"] = {
         "video_path": video_path,
@@ -413,6 +432,7 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
         "frames": [],
         "processing_complete": False,
         "current_progress": 0,
+        "output_path": output_path, # Store path for download
     }
 
     # 3. Set batch processing flag
@@ -428,6 +448,7 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
         print("[ERROR] Model not loaded!")
         app_state["batch_processing_active"] = False
         cap.release()
+        if out_writer: out_writer.release()
         return False
 
     # 4. Process each frame
@@ -438,6 +459,13 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
         if not app_state.get("batch_processing_active", False):
             print("[INFO] Batch processing cancelled by user")
             cap.release()
+            if out_writer: out_writer.release()
+            # Cleanup partial file
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except:
+                    pass
             return False
 
         # Read frame
@@ -571,6 +599,10 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
             torch.cuda.empty_cache()
             # Continue with unprocessed frame
 
+        # Write processed frame to video file
+        if out_writer:
+            out_writer.write(frame)
+
         # Encode frame as JPEG
         _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         jpg_b64 = base64.b64encode(buffer).decode('utf-8')
@@ -591,7 +623,10 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
     app_state["batch_processing_active"] = False
 
     cap.release()
+    if out_writer: out_writer.release()
+    
     print(f"--- Batch Processing Complete: {len(processed_frames)} frames processed ---")
+    print(f"--- Video saved to: {output_path} ---")
     return True
 
 async def video_processing_loop(manager, app_state):

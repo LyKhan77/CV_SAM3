@@ -783,6 +783,7 @@ function updateDashboard(data) {
     // Handle Video Mode UI states
     const progressContainer = document.getElementById('batch-progress-container');
     const playbackControls = document.getElementById('video-playback-controls');
+    const downloadPanel = document.getElementById('download-video-panel');
     const currentMode = document.querySelector('input[name="input-mode"]:checked')?.value;
 
     if (currentMode === 'video') {
@@ -794,6 +795,15 @@ function updateDashboard(data) {
         // Hide progress bar when not processing
         if (progressContainer && analytics.process_status !== "Processing...") {
             progressContainer.classList.add('hidden');
+        }
+        
+        // Show Download Panel ONLY when Done
+        if (downloadPanel) {
+            if (analytics.process_status === "Done") {
+                downloadPanel.classList.remove('hidden');
+            } else {
+                downloadPanel.classList.add('hidden');
+            }
         }
 
         // Unlock controls when Done or Ready
@@ -813,6 +823,9 @@ function updateDashboard(data) {
                 radio.disabled = false;
             });
         }
+    } else {
+        // Hide download panel in other modes
+        if (downloadPanel) downloadPanel.classList.add('hidden');
     }
 
     // 1. Update Video Feed
@@ -1979,6 +1992,10 @@ async function saveAndviewResults() {
         console.error("Error saving snapshot:", error);
         container.innerHTML = `<div class="col-span-full text-center text-xs text-red-500 py-2">Error: ${error.message}</div>`;
     }
+}
+
+function downloadProcessedVideo() {
+    window.location.href = "/api/video/download";
 }
 
 // Add global click listener for modal closing and initialize app
