@@ -635,15 +635,6 @@ async def clear_mask():
         # We don't clear last_processed_frame because we still want to show the image
         return {"status": "success", "message": "Masks cleared"}
 
-@app.post("/api/snapshot/save")
-async def save_snapshot():
-    """
-    Save current masks and crops to ObjectList/{filename}/ folder.
-    Returns list of output objects for UI.
-    """
-    current_mode = app_state.get("input_mode")
-    # ... (existing logic) ...
-
 @app.get("/api/video/download")
 async def download_processed_video():
     """
@@ -817,4 +808,4 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # --- 7. Uvicorn Runner ---
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

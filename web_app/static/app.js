@@ -1,6 +1,6 @@
 // --- 0. Constants and Configuration ---
-const API_BASE_URL = "http://127.0.0.1:8000";
-const WS_URL = "ws://127.0.0.1:8000/ws/monitor";
+const API_BASE_URL = `${window.location.origin}`;
+const WS_URL = `ws://${window.location.host}/ws/monitor`;
 
 // --- 1. Utilities (Time) ---
 function updateTime() {
@@ -1194,8 +1194,11 @@ async function switchInputMode(mode) {
     // Hide video-specific controls when leaving video mode
     const videoPlaybackControls = document.getElementById('video-playback-controls');
     const videoFileInfo = document.getElementById('video-file-info');
+    const downloadPanel = document.getElementById('download-video-panel');
+    
     if (videoPlaybackControls) videoPlaybackControls.classList.add('hidden');
     if (videoFileInfo) videoFileInfo.classList.add('hidden');
+    if (downloadPanel) downloadPanel.classList.add('hidden');
 
     // Clear prompts UI when switching modes
     const promptInput = document.getElementById('prompt-input');
