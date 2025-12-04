@@ -377,12 +377,78 @@
                                 </div>
                             </div>
 
-                            <!-- Click to Select (Hidden in Video Mode) -->
-                            <div data-mode="image rtsp" class="flex items-center justify-between pt-2 border-t border-gray-100">
-                                <span class="text-sm font-medium text-gray-600">Click to Select</span>
-                                <div class="relative inline-block w-10 align-middle select-none">
-                                    <input type="checkbox" id="select-object-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-gray-300 checked:border-primary left-0 checked:left-5 transition-all duration-300"/>
-                                    <label for="select-object-toggle" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer"></label>
+                            <!-- Interactive Segmentation (Image Mode Only) -->
+                            <div id="interactive-seg-section" data-mode="image" class="pt-3 border-t border-gray-100 hidden">
+                                <!-- Enable Interactive Segmentation -->
+                                <div class="flex items-center justify-between mb-3">
+                                    <label class="text-sm font-medium text-gray-700">
+                                        <i class="fa-solid fa-hand-pointer mr-1 text-primary"></i>
+                                        Interactive Segmentation
+                                    </label>
+                                    <div class="relative inline-block w-10 align-middle select-none">
+                                        <input type="checkbox" id="interactive-seg-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-gray-300 checked:border-primary left-0 checked:left-5 transition-all duration-300"/>
+                                        <label for="interactive-seg-toggle" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer"></label>
+                                    </div>
+                                </div>
+
+                                <!-- Point Type Selection (Radio Buttons) -->
+                                <div id="point-type-selection" class="flex gap-4 pl-6 hidden">
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="point-type" value="positive" checked class="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500"/>
+                                        <span class="text-sm text-gray-700">
+                                            <i class="fa-solid fa-plus-circle text-green-600"></i> Positive
+                                        </span>
+                                    </label>
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="point-type" value="negative" class="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"/>
+                                        <span class="text-sm text-gray-700">
+                                            <i class="fa-solid fa-minus-circle text-red-600"></i> Negative
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Clicked Points Table (Image Mode Only) -->
+                            <div id="clicked-points-section" data-mode="image" class="hidden pt-3 border-t border-gray-100">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h4 class="text-sm font-semibold text-gray-700">
+                                        <i class="fa-solid fa-table mr-1 text-primary"></i>
+                                        Clicked Points
+                                    </h4>
+                                    <button onclick="clearAllPoints()" class="text-xs text-red-500 hover:text-red-700 font-medium">
+                                        <i class="fa-solid fa-trash"></i> Clear All
+                                    </button>
+                                </div>
+
+                                <div class="max-h-40 overflow-y-auto border border-gray-200 rounded">
+                                    <table class="w-full text-xs">
+                                        <thead class="bg-gray-100 sticky top-0">
+                                            <tr>
+                                                <th class="px-2 py-1 text-left">Obj ID</th>
+                                                <th class="px-2 py-1 text-left">Label</th>
+                                                <th class="px-2 py-1 text-right">X</th>
+                                                <th class="px-2 py-1 text-right">Y</th>
+                                                <th class="px-2 py-1 text-center">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="points-table-body" class="divide-y divide-gray-200">
+                                            <tr id="no-points-row">
+                                                <td colspan="5" class="px-2 py-3 text-center text-gray-400">
+                                                    No points clicked yet
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <!-- Object ID Selector -->
+                                <div class="mt-2 flex items-center gap-2">
+                                    <label class="text-xs text-gray-600">Current Object ID:</label>
+                                    <input type="number" id="current-obj-id" value="1" min="1" max="99"
+                                           class="w-16 px-2 py-1 text-xs border border-gray-300 rounded"/>
+                                    <button onclick="incrementObjId()" class="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded">
+                                        <i class="fa-solid fa-plus"></i> New Object
+                                    </button>
                                 </div>
                             </div>
 
@@ -440,6 +506,8 @@
 
                             <div id="live-indicator" class="hidden absolute top-4 left-4 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse z-20">LIVE</div>
                             <img id="mock-video-feed" src="" class="hidden w-full h-full object-contain z-0 absolute inset-0">
+                            <!-- Marker Canvas Overlay (for interactive segmentation points) -->
+                            <canvas id="marker-canvas" class="hidden absolute inset-0 w-full h-full z-30 pointer-events-none"></canvas>
                             <div id="upload-overlay" class="absolute inset-0 z-50 hidden cursor-pointer"></div>
                         </div>
 

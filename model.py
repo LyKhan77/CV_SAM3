@@ -7,7 +7,7 @@ import torchvision # Added for NMS
 import numpy as np
 import colorsys
 from PIL import Image
-from transformers import Sam3Processor, Sam3Model
+from transformers import Sam3Processor, Sam3Model, Sam3TrackerProcessor, Sam3TrackerModel
 import torch.nn.functional as F
 
 def draw_masks(frame, masks):
@@ -312,18 +312,52 @@ def merge_overlapping_masks(masks):
 
 def load_model():
     try:
-        print("--- Loading SAM-3 Model ---")
+        print("\n" + "="*60)
+        print("SAM 3 MODEL SELECTION")
+        print("="*60)
+        print("\n[1] Sam3Model - Text Prompts (Concept Segmentation)")
+        print("    ✓ Supports: Text prompts (e.g., 'cat', 'person')")
+        print("    ✗ Does NOT support: Point/Click prompts")
+        print("    Use for: Image/Video mode with text input\n")
+
+        print("[2] Sam3TrackerModel - Point/Click Prompts (RECOMMENDED)")
+        print("    ✓ Supports: Point prompts, Box prompts")
+        print("    ✗ Does NOT support: Text prompts")
+        print("    Use for: Interactive Segmentation with clicks")
+        print("    ⭐ Best choice for this app\n")
+        print("="*60)
+
+        choice = input("\nSelect model [1/2] (default: 2): ").strip()
+
+        if choice == "1":
+            model_type = "text"
+            model_id = "facebook/sam3"
+            print("\n✓ Loading Sam3Model (Text Prompts)...")
+        else:  # Default to TrackerModel (choice == "2" or empty)
+            model_type = "tracker"
+            model_id = "facebook/sam3"  # Same model ID, different class
+            print("\n✓ Loading Sam3TrackerModel (Point Prompts)...")
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {device}")
 
-        model_id = "facebook/sam3"
-        processor = Sam3Processor.from_pretrained(model_id)
-        model = Sam3Model.from_pretrained(model_id).to(device)
+        if model_type == "text":
+            processor = Sam3Processor.from_pretrained(model_id)
+            model = Sam3Model.from_pretrained(model_id).to(device)
+        else:  # tracker
+            processor = Sam3TrackerProcessor.from_pretrained(model_id)
+            model = Sam3TrackerModel.from_pretrained(model_id).to(device)
 
-        print("--- Model Loaded Successfully ---")
+        print("--- Model Loaded Successfully ---\n")
+
+        # Store model type in model object for later reference
+        model.model_type = model_type
+
         return model, processor
     except Exception as e:
         print(f"FATAL: Failed to load model: {e}")
+        import traceback
+        traceback.print_exc()
         return None, None
 
 async def batch_process_video(app_state, video_path, prompt, point_prompt, confidence, mask_thresh, max_input_size=1024):
@@ -438,25 +472,61 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
 
             image_pil = Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB))
 
+            # Get model type
+            model_type = getattr(model, 'model_type', 'text')
+
             # Prepare inputs
             inputs = None
             if prompt:
-                inputs = processor(
-                    text=[prompt],
-                    images=image_pil,
-                    return_tensors="pt"
-                ).to(device)
+                # Text prompt mode
+                if model_type != 'text':
+                    print(f"[WARN] Batch frame {frame_idx}: Text prompts not supported with Sam3TrackerModel")
+                else:
+                    inputs = processor(
+                        text=[prompt],
+                        images=image_pil,
+                        return_tensors="pt"
+                    ).to(device)
+
+            elif app_state.get("clicked_points"):
+                # Interactive Segmentation: Use native point prompts
+                if model_type != 'tracker':
+                    print(f"[WARN] Batch frame {frame_idx}: Point prompts not supported with Sam3Model")
+                else:
+                    clicked_points = app_state.get("clicked_points", [])
+
+                    # Convert to SAM 3 format: 4D nested list
+                    input_points = [[]]
+                    input_labels = [[]]
+
+                    for point in clicked_points:
+                        abs_x = int(point["x"] * orig_w)
+                        abs_y = int(point["y"] * orig_h)
+                        input_points[0].append([[abs_x, abs_y]])
+                        input_labels[0].append([point["label"]])
+
+                    inputs = processor(
+                        images=image_pil,
+                        input_points=input_points,
+                        input_labels=input_labels,
+                        return_tensors="pt"
+                    ).to(device)
+
             elif point_prompt:
-                abs_x = int(point_prompt["x"] * orig_w)
-                abs_y = int(point_prompt["y"] * orig_h)
-                curr_w, curr_h = image_pil.size
-                scaled_x = int(abs_x * (curr_w / orig_w))
-                scaled_y = int(abs_y * (curr_h / orig_h))
-                inputs = processor(
-                    images=image_pil,
-                    input_points=[[[scaled_x, scaled_y]]],
-                    return_tensors="pt"
-                ).to(device)
+                # Legacy single point prompt
+                if model_type != 'tracker':
+                    print(f"[WARN] Batch frame {frame_idx}: Point prompts not supported with Sam3Model")
+                else:
+                    abs_x = int(point_prompt["x"] * orig_w)
+                    abs_y = int(point_prompt["y"] * orig_h)
+                    label = point_prompt.get("label", 1)
+
+                    inputs = processor(
+                        images=image_pil,
+                        input_points=[[[[abs_x, abs_y]]]],
+                        input_labels=[[[label]]],
+                        return_tensors="pt"
+                    ).to(device)
 
             # Run inference
             if inputs:
@@ -489,6 +559,8 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
 
                         final_masks.append(mask_uint8)
 
+                # Note: With native point prompts, SAM 3 returns 1 mask per point
+                # No post-filtering needed
                 count = len(final_masks)
 
                 # Draw masks on frame
@@ -912,7 +984,11 @@ async def video_processing_loop(manager, app_state):
         count = last_count if input_mode == "image" else 0
         is_currently_processing = False  # Track if we're actively running inference THIS iteration
 
-        should_process = (model and processor and (prompt or point_prompt) and should_segment)
+        # Check if we have any prompt (text, point, or clicked_points array)
+        clicked_points = app_state.get("clicked_points", [])
+        has_prompt = prompt or point_prompt or (clicked_points and len(clicked_points) > 0)
+
+        should_process = (model and processor and has_prompt and should_segment)
         if input_mode in ["rtsp", "video"]:
              # Use dynamic processing_interval instead of hardcoded 5
              should_process = should_process and (frame_counter % processing_interval == 0)
@@ -937,29 +1013,68 @@ async def video_processing_loop(manager, app_state):
 
             inputs = None
             try:
+                # Get model type
+                model_type = getattr(model, 'model_type', 'text')  # Default to 'text' if not set
+
                 # Prepare Inputs
                 if prompt:
-                    inputs = processor(
-                        text=[prompt],
-                        images=image_pil,
-                        return_tensors="pt"
-                    ).to(device)
-                
+                    # Text prompt mode (for Image/Video with text input)
+                    if model_type != 'text':
+                        print("[WARN] Text prompts not supported with Sam3TrackerModel. Use Sam3Model instead.")
+                        # Skip inference
+                    else:
+                        inputs = processor(
+                            text=[prompt],
+                            images=image_pil,
+                            return_tensors="pt"
+                        ).to(device)
+
+                elif app_state.get("clicked_points"):
+                    # Interactive Segmentation: Use native point prompts
+                    if model_type != 'tracker':
+                        print("[WARN] Point prompts not supported with Sam3Model. Use Sam3TrackerModel instead.")
+                        # Skip inference
+                    else:
+                        clicked_points = app_state.get("clicked_points", [])
+
+                        # Convert to SAM 3 format: 4D nested list [batch][object][point][xy]
+                        # Each object gets one point (the clicked coordinate)
+                        input_points = [[]]  # Batch dimension
+                        input_labels = [[]]  # Batch dimension
+
+                        for point in clicked_points:
+                            # Convert normalized coordinates to absolute pixels
+                            abs_x = int(point["x"] * orig_w)
+                            abs_y = int(point["y"] * orig_h)
+
+                            # Add point: [[[x, y]]] format for each object
+                            input_points[0].append([[abs_x, abs_y]])
+                            input_labels[0].append([point["label"]])  # 1=positive, 0=negative
+
+                        print(f"[DEBUG] Sending {len(input_points[0])} points to SAM 3 Tracker: {input_points}")
+
+                        inputs = processor(
+                            images=image_pil,
+                            input_points=input_points,
+                            input_labels=input_labels,
+                            return_tensors="pt"
+                        ).to(device)
+
                 elif point_prompt:
-                    # Use ORIGINAL frame size for coordinate calculation
-                    abs_x = int(point_prompt["x"] * orig_w)
-                    abs_y = int(point_prompt["y"] * orig_h)
+                    # Legacy single point prompt support (backward compatibility)
+                    if model_type != 'tracker':
+                        print("[WARN] Point prompts not supported with Sam3Model. Use Sam3TrackerModel instead.")
+                    else:
+                        abs_x = int(point_prompt["x"] * orig_w)
+                        abs_y = int(point_prompt["y"] * orig_h)
+                        label = point_prompt.get("label", 1)
 
-                    # Scale to resized image coordinates
-                    curr_w, curr_h = image_pil.size
-                    scaled_x = int(abs_x * (curr_w / orig_w))
-                    scaled_y = int(abs_y * (curr_h / orig_h))
-
-                    inputs = processor(
-                        images=image_pil,
-                        input_points=[[[scaled_x, scaled_y]]],
-                        return_tensors="pt"
-                    ).to(device)
+                        inputs = processor(
+                            images=image_pil,
+                            input_points=[[[[abs_x, abs_y]]]],  # 4D format
+                            input_labels=[[[label]]],
+                            return_tensors="pt"
+                        ).to(device)
 
                 # Run Inference
                 if inputs:
@@ -974,6 +1089,13 @@ async def video_processing_loop(manager, app_state):
                         mask_threshold=mask_thresh,  # Mask binarization threshold
                         target_sizes=[[orig_h, orig_w]]  # Resize masks to original frame size
                     )[0]
+
+                    # Debug: Log SAM 3 output
+                    raw_mask_count = len(results.get('masks', []))
+                    print(f"[DEBUG] SAM 3 output: {raw_mask_count} masks (confidence={confidence}, mask_thresh={mask_thresh})")
+
+                    # Note: With native point prompts, SAM 3 returns 1 mask per point
+                    # No post-filtering needed - masks are already matched to clicked points
 
                     # Extract and convert masks to numpy uint8 format (for drawing & ObjectList/ export)
                     final_masks = []

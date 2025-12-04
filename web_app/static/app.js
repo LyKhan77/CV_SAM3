@@ -22,7 +22,12 @@ updateTime();
 // --- 2. State Management ---
 let frontendState = {
     currentCount: 0,
-    isClickSelectMode: false,
+    isInteractiveSegMode: false,  // Interactive Segmentation enabled
+    currentPointType: "positive",  // "positive" or "negative"
+    clickedPoints: [],  // Array of {x, y, label, obj_id, id}
+    currentObjId: 1,
+    pointIdCounter: 0,  // Auto-increment for unique point IDs
+    lastFrameSrc: null,  // For detecting frame changes
     lastProcessStatus: "Ready"
 };
 
@@ -39,6 +44,270 @@ socket.onmessage = (event) => {
         console.error("Failed to parse WebSocket message:", e, "Raw data:", event.data);
     }
 };
+
+// --- 4. Interactive Segmentation Setup ---
+function initInteractiveSegmentation() {
+    const toggle = document.getElementById('interactive-seg-toggle');
+    const pointTypeSelection = document.getElementById('point-type-selection');
+    const videoFeed = document.getElementById('mock-video-feed');
+    const markerCanvas = document.getElementById('marker-canvas');
+    const videoContainer = videoFeed?.parentElement;
+
+    console.log("Initializing Interactive Segmentation...");
+    console.log("Toggle found:", !!toggle);
+    console.log("Point Type Selection found:", !!pointTypeSelection);
+    console.log("Video Feed found:", !!videoFeed);
+    console.log("Marker Canvas found:", !!markerCanvas);
+
+    // Toggle event: Show/hide point type selection
+    if (toggle) {
+        toggle.addEventListener('change', (e) => {
+            const isEnabled = e.target.checked;
+            frontendState.isInteractiveSegMode = isEnabled;
+
+            if (isEnabled) {
+                if (pointTypeSelection) {
+                    pointTypeSelection.classList.remove('hidden');
+                    console.log("Point type selection shown");
+                } else {
+                    console.error("Point type selection element not found!");
+                }
+                if (markerCanvas) markerCanvas.classList.remove('hidden');
+                if (videoContainer) videoContainer.style.cursor = 'crosshair';
+                console.log("Interactive Segmentation Mode: ENABLED");
+            } else {
+                if (pointTypeSelection) pointTypeSelection.classList.add('hidden');
+                if (markerCanvas) markerCanvas.classList.add('hidden');
+                if (videoContainer) videoContainer.style.cursor = 'default';
+                clearMarkers();
+                console.log("Interactive Segmentation Mode: DISABLED");
+            }
+        });
+    } else {
+        console.error("Interactive Segmentation toggle not found!");
+    }
+
+    // Radio button events: Update point type
+    const radioButtons = document.querySelectorAll('input[name="point-type"]');
+    console.log("Radio buttons found:", radioButtons.length);
+    radioButtons.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            frontendState.currentPointType = e.target.value;
+            console.log(`Point type changed to: ${frontendState.currentPointType}`);
+        });
+    });
+
+    // Click event on video feed
+    if (videoFeed) {
+        videoFeed.addEventListener('click', handleCanvasClick);
+    }
+
+    console.log("Interactive Segmentation initialized.");
+}
+
+function handleCanvasClick(event) {
+    // Only process if Interactive Seg is enabled
+    if (!frontendState.isInteractiveSegMode) return;
+
+    // Get current mode
+    const imagePanel = document.getElementById('image-panel');
+    const rtspPanel = document.getElementById('rtsp-panel');
+    const videoPanel = document.getElementById('video-panel');
+
+    let currentMode = null;
+    if (!imagePanel.classList.contains('hidden')) currentMode = 'image';
+    else if (!rtspPanel.classList.contains('hidden')) currentMode = 'rtsp';
+    else if (!videoPanel.classList.contains('hidden')) currentMode = 'video';
+
+    if (currentMode !== 'image') {
+        console.warn("Interactive Segmentation only works in Image mode.");
+        return;
+    }
+
+    const videoFeed = document.getElementById('mock-video-feed');
+    const rect = videoFeed.getBoundingClientRect();
+
+    // Calculate normalized coordinates (0-1 range)
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+
+    // Validate bounds
+    if (x < 0 || x > 1 || y < 0 || y > 1) {
+        console.warn("Click outside image bounds");
+        return;
+    }
+
+    // Get current object ID from input
+    const objIdInput = document.getElementById('current-obj-id');
+    const objId = parseInt(objIdInput.value) || 1;
+
+    // Determine label based on current point type
+    const label = frontendState.currentPointType === "positive" ? 1 : 0;
+
+    // Create point object
+    const pointId = ++frontendState.pointIdCounter;
+    const point = { id: pointId, x, y, label, obj_id: objId };
+
+    // Add to state
+    frontendState.clickedPoints.push(point);
+
+    // Send to backend via WebSocket
+    const message = {
+        type: "add_point",
+        point: point
+    };
+
+    console.log("Point added:", point);
+    socket.send(JSON.stringify(message));
+
+    // Update UI
+    addPointToTable(point);
+    drawAllMarkers();
+
+    // NOTE: User will manually click "Run Segmentation" button
+}
+
+function drawAllMarkers() {
+    const markerCanvas = document.getElementById('marker-canvas');
+    const videoFeed = document.getElementById('mock-video-feed');
+
+    if (!markerCanvas || !videoFeed) return;
+
+    // Match canvas size to video feed
+    const rect = videoFeed.getBoundingClientRect();
+    markerCanvas.width = rect.width;
+    markerCanvas.height = rect.height;
+
+    const ctx = markerCanvas.getContext('2d');
+    ctx.clearRect(0, 0, markerCanvas.width, markerCanvas.height);
+
+    // Draw all points
+    frontendState.clickedPoints.forEach(point => {
+        const canvasX = point.x * markerCanvas.width;
+        const canvasY = point.y * markerCanvas.height;
+
+        const color = point.label === 1 ? '#10B981' : '#EF4444';
+        const icon = point.label === 1 ? '+' : '-';
+
+        // Draw outer circle
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(canvasX, canvasY, 12, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        // Draw inner filled circle
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(canvasX, canvasY, 5, 0, 2 * Math.PI);
+        ctx.fill();
+
+        // Draw icon (+/-)
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 16px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(icon, canvasX, canvasY);
+
+        // Draw Object ID label above marker
+        ctx.fillStyle = color;
+        ctx.font = 'bold 10px Inter, sans-serif';
+        ctx.fillText(`#${point.obj_id}`, canvasX, canvasY - 20);
+    });
+
+    console.log(`Drew ${frontendState.clickedPoints.length} markers`);
+}
+
+function clearMarkers() {
+    const markerCanvas = document.getElementById('marker-canvas');
+    if (markerCanvas) {
+        const ctx = markerCanvas.getContext('2d');
+        ctx.clearRect(0, 0, markerCanvas.width, markerCanvas.height);
+    }
+    console.log("Markers cleared.");
+}
+
+// Table management functions
+function addPointToTable(point) {
+    const tbody = document.getElementById('points-table-body');
+    const noPointsRow = document.getElementById('no-points-row');
+
+    // Hide "no points" message
+    if (noPointsRow) noPointsRow.classList.add('hidden');
+
+    // Create row
+    const row = document.createElement('tr');
+    row.id = `point-row-${point.id}`;
+    row.innerHTML = `
+        <td class="px-2 py-1">#${point.obj_id}</td>
+        <td class="px-2 py-1">
+            <span class="inline-flex items-center gap-1 text-xs font-medium ${point.label === 1 ? 'text-green-600' : 'text-red-600'}">
+                <i class="fa-solid fa-${point.label === 1 ? 'plus' : 'minus'}-circle"></i>
+                ${point.label === 1 ? 'Positive' : 'Negative'}
+            </span>
+        </td>
+        <td class="px-2 py-1 text-right">${point.x.toFixed(3)}</td>
+        <td class="px-2 py-1 text-right">${point.y.toFixed(3)}</td>
+        <td class="px-2 py-1 text-center">
+            <button onclick="deletePoint(${point.id})" class="text-red-500 hover:text-red-700">
+                <i class="fa-solid fa-trash text-xs"></i>
+            </button>
+        </td>
+    `;
+
+    tbody.appendChild(row);
+}
+
+function deletePoint(pointId) {
+    // Remove from state
+    frontendState.clickedPoints = frontendState.clickedPoints.filter(p => p.id !== pointId);
+
+    // Remove from table
+    const row = document.getElementById(`point-row-${pointId}`);
+    if (row) row.remove();
+
+    // Show "no points" if empty
+    if (frontendState.clickedPoints.length === 0) {
+        const noPointsRow = document.getElementById('no-points-row');
+        if (noPointsRow) noPointsRow.classList.remove('hidden');
+    }
+
+    // Send to backend
+    socket.send(JSON.stringify({ type: "delete_point", point_id: pointId }));
+
+    // Redraw markers
+    drawAllMarkers();
+
+    console.log("Point deleted:", pointId);
+}
+
+function clearAllPoints() {
+    frontendState.clickedPoints = [];
+
+    // Clear table
+    const tbody = document.getElementById('points-table-body');
+    const rows = tbody.querySelectorAll('tr:not(#no-points-row)');
+    rows.forEach(row => row.remove());
+
+    // Show "no points" message
+    const noPointsRow = document.getElementById('no-points-row');
+    if (noPointsRow) noPointsRow.classList.remove('hidden');
+
+    // Send to backend
+    socket.send(JSON.stringify({ type: "clear_points" }));
+
+    // Clear markers
+    clearMarkers();
+
+    console.log("All points cleared");
+}
+
+function incrementObjId() {
+    const objIdInput = document.getElementById('current-obj-id');
+    const currentVal = parseInt(objIdInput.value) || 1;
+    objIdInput.value = currentVal + 1;
+    frontendState.currentObjId = currentVal + 1;
+}
 
 // --- Modal Functions ---
 function openHelpModal() {
@@ -288,7 +557,10 @@ async function clearMask() {
         }
 
         await postData("/api/config/clear-mask", {});
-        
+
+        // Clear interactive segmentation markers and points
+        clearAllPoints();
+
         // Clear Visuals
         const descStatusEl = document.getElementById('desc-status');
         const statusDot = document.getElementById('status-dot');
@@ -552,6 +824,18 @@ function updateDashboard(data) {
         // If in RTSP/Video mode, ensure placeholder is hidden
         if (analytics.input_mode !== 'image') {
              document.getElementById('stream-placeholder').classList.add('hidden');
+        }
+
+        // Redraw markers only if image changed (prevent redraw loop)
+        if (frontendState.clickedPoints.length > 0 && analytics.input_mode === 'image') {
+            // Check if this is a new frame (not just status update)
+            if (videoFeed.src !== frontendState.lastFrameSrc) {
+                frontendState.lastFrameSrc = videoFeed.src;
+
+                setTimeout(() => {
+                    drawAllMarkers();
+                }, 50);
+            }
         }
     }
 
@@ -1004,6 +1288,15 @@ function updateModePanelVisibility(mode) {
     document.querySelectorAll(`[data-mode*="${mode}"]`).forEach(panel => {
         panel.classList.remove('hidden');
     });
+
+    // Disable Interactive Segmentation if switching away from Image mode
+    if (mode !== 'image') {
+        const toggle = document.getElementById('interactive-seg-toggle');
+        if (toggle && toggle.checked) {
+            toggle.checked = false;
+            toggle.dispatchEvent(new Event('change'));
+        }
+    }
 
     console.log(`Updated panel visibility for mode: ${mode}`);
 }
@@ -1711,4 +2004,5 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeInputModeSwitching();
     setupModelConfigListeners();
     setupSummaryListeners();
+    initInteractiveSegmentation();
 });

@@ -45,7 +45,8 @@ app_state: Dict[str, Any] = {
     "rtsp_url": None,
     "uploaded_image_path": None,  # NEW field for local image support
     "prompt": None,
-    "point_prompt": None,
+    "point_prompt": None,  # Legacy: single point (kept for backward compatibility)
+    "clicked_points": [],  # Array of points: [{"x": 0.5, "y": 0.3, "label": 1, "obj_id": 1, "id": 1}, ...]
     "max_limit": 100,
     "sound_enabled": False,
     "model": None,
@@ -629,6 +630,8 @@ async def clear_mask():
         # Image/RTSP Mode: Keep existing logic
         app_state["should_segment"] = False
         app_state["last_raw_masks"] = []
+        app_state["point_prompt"] = None  # Clear legacy point prompt
+        app_state["clicked_points"] = []  # Clear clicked points
         # We don't clear last_processed_frame because we still want to show the image
         return {"status": "success", "message": "Masks cleared"}
 
@@ -748,13 +751,42 @@ async def save_snapshot():
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        while True: 
+        while True:
             # Handle incoming messages for point prompts
             data = await websocket.receive_json()
-            if data.get("type") == "point_prompt":
-                app_state["point_prompt"] = data.get("points")
-                app_state["prompt"] = None # Clear text prompt
-                print(f"Received point prompt: {app_state['point_prompt']}")
+            message_type = data.get("type")
+
+            if message_type == "add_point":
+                # Add point to clicked points array
+                point = data.get("point")
+                if point:
+                    app_state["clicked_points"].append(point)
+                    app_state["prompt"] = None  # Clear text prompt (mutually exclusive)
+                    print(f"Point added: {point}")
+
+            elif message_type == "delete_point":
+                # Remove point by ID
+                point_id = data.get("point_id")
+                app_state["clicked_points"] = [
+                    p for p in app_state["clicked_points"]
+                    if p.get("id") != point_id
+                ]
+                print(f"Point deleted: {point_id}")
+
+            elif message_type == "clear_points":
+                # Clear all points
+                app_state["clicked_points"] = []
+                print("All points cleared")
+
+            # Legacy support for old point_prompt
+            elif message_type == "point_prompt":
+                points = data.get("points")
+                if points and "label" not in points:
+                    points["label"] = 1
+                app_state["point_prompt"] = points
+                app_state["prompt"] = None
+                print(f"Received point prompt (legacy): {app_state['point_prompt']}")
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
