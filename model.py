@@ -561,13 +561,35 @@ async def batch_process_video(app_state, video_path, prompt, point_prompt, confi
                 with torch.no_grad():
                     outputs = model(**inputs)
 
-                # Post-process using official processor
-                results = processor.post_process_instance_segmentation(
-                    outputs,
-                    threshold=confidence,
-                    mask_threshold=mask_thresh,
-                    target_sizes=[[orig_h, orig_w]]
-                )[0]
+                # Post-processing based on model type
+                if model_type == 'text':
+                    # Sam3Model: Use instance segmentation post-processing
+                    results = processor.post_process_instance_segmentation(
+                        outputs,
+                        threshold=confidence,
+                        mask_threshold=mask_thresh,
+                        target_sizes=[[orig_h, orig_w]]
+                    )[0]
+
+                else:  # tracker
+                    # Sam3TrackerModel: Use masks post-processing
+                    processed_masks = processor.post_process_masks(
+                        outputs.pred_masks.cpu(),
+                        inputs["original_sizes"],
+                        mask_threshold=mask_thresh,
+                        binarize=True
+                    )
+
+                    # Filter by IoU scores
+                    iou_scores = outputs.iou_scores.squeeze(0)
+
+                    final_masks_list = []
+                    for i, (mask_batch, score_batch) in enumerate(zip(processed_masks[0], iou_scores)):
+                        for mask, score in zip(mask_batch, score_batch):
+                            if score >= confidence:
+                                final_masks_list.append(mask.cpu().numpy())
+
+                    results = {'masks': final_masks_list}
 
                 # Extract masks
                 final_masks = []
@@ -1116,21 +1138,47 @@ async def video_processing_loop(manager, app_state):
                     with torch.no_grad():
                         outputs = model(**inputs)
 
-                    # ✅ OFFICIAL SAM-3 POST-PROCESSING (Meta's optimized pipeline)
-                    # Replaces custom process_sam3_outputs_optimized() for smooth, accurate results
-                    results = processor.post_process_instance_segmentation(
-                        outputs,
-                        threshold=confidence,  # Confidence threshold (IoU-based filtering)
-                        mask_threshold=mask_thresh,  # Mask binarization threshold
-                        target_sizes=[[orig_h, orig_w]]  # Resize masks to original frame size
-                    )[0]
+                    # Post-processing based on model type
+                    if model_type == 'text':
+                        # Sam3Model: Use instance segmentation post-processing
+                        results = processor.post_process_instance_segmentation(
+                            outputs,
+                            threshold=confidence,
+                            mask_threshold=mask_thresh,
+                            target_sizes=[[orig_h, orig_w]]
+                        )[0]
 
-                    # Debug: Log SAM 3 output
-                    raw_mask_count = len(results.get('masks', []))
-                    print(f"[DEBUG] SAM 3 output: {raw_mask_count} masks (confidence={confidence}, mask_thresh={mask_thresh})")
+                        raw_mask_count = len(results.get('masks', []))
+                        print(f"[DEBUG] Sam3Model output: {raw_mask_count} masks")
 
-                    # Note: With native point prompts, SAM 3 returns 1 mask per point
-                    # No post-filtering needed - masks are already matched to clicked points
+                    else:  # tracker
+                        # Sam3TrackerModel: Use masks post-processing
+                        # Process masks
+                        processed_masks = processor.post_process_masks(
+                            outputs.pred_masks.cpu(),
+                            inputs["original_sizes"],
+                            mask_threshold=mask_thresh,
+                            binarize=True
+                        )
+
+                        # Filter by IoU scores (confidence threshold)
+                        iou_scores = outputs.iou_scores.squeeze(0)  # Remove batch dim
+
+                        final_masks_list = []
+                        for i, (mask_batch, score_batch) in enumerate(zip(processed_masks[0], iou_scores)):
+                            # mask_batch shape: (num_masks, H, W)
+                            # score_batch shape: (num_masks,)
+                            for mask, score in zip(mask_batch, score_batch):
+                                if score >= confidence:
+                                    final_masks_list.append(mask.cpu().numpy())
+
+                        # Create results dict compatible with existing code
+                        results = {'masks': final_masks_list}
+
+                        print(f"[DEBUG] Sam3TrackerModel output: {len(final_masks_list)} masks (iou >= {confidence})")
+
+                    # Note: With native point prompts, SAM 3 Tracker returns 1 mask per point
+                    # Masks are already matched to clicked points
 
                     # Extract and convert masks to numpy uint8 format (for drawing & ObjectList/ export)
                     final_masks = []
